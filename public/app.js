@@ -17,8 +17,9 @@ const db = getFirestore(app);
 const $ = (id) => document.getElementById(id);
 const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
 const safeUrl = (u) => (/^https:\/\//.test(u || "") ? esc(u) : "");
-// Letras e números de qualquer alfabeto (títulos em japonês, cirílico etc. não podem colidir)
-const bookId = (b) => (b.title + " " + b.author).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 120);
+// Letras e números de qualquer alfabeto (títulos em japonês, cirílico etc. não podem colidir).
+// Usa o título original, para o mesmo livro ter o mesmo id (e os mesmos comentários) em qualquer idioma.
+const bookId = (b) => ((b.originalTitle || b.title) + " " + b.author).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 120);
 
 let user = null;
 let shelf = []; // livros da estante do usuário
@@ -133,6 +134,11 @@ onAuthStateChanged(auth, (u) => {
 // --- estante
 const COLORS = ["#8c3b3b", "#2f5d62", "#6b5b95", "#a87631", "#3d6b4f", "#a24f78"];
 const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+// Sem capa no Open Library (web novels, edições raras): capa gerada com o título, na cor da lombada
+const coverHtml = (b) => safeUrl(b.cover)
+  ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">`
+  : `<div class="cover ph" style="background:${COLORS[hash(bookId(b)) % COLORS.length]}"><span>${esc(b.title)}</span></div>`;
+
 const STATUS = { lido: "Lido", lendo: "Lendo", quero: "Quero ler" };
 const statusOf = (b) => b.status || "lido"; // livros antigos não têm status
 let filter = "todos";
@@ -159,7 +165,7 @@ function detailHtml(b, mine) {
     ? `<div class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${status === k}">${v}</button>`).join("")}</div>
        <div class="stars" role="group" aria-label="Sua nota">${stars(b.rating || 0, true)}</div>`
     : `<div class="note" style="margin:8px 0 0">${STATUS[status]}</div><div class="stars" role="img" aria-label="Nota ${b.rating || 0} de 5">${stars(b.rating || 0, false)}</div>`;
-  return `${b.cover ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">` : `<div class="cover"></div>`}
+  return `${coverHtml(b)}
     <div><h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
       ${controls}
       <p style="margin:12px 0;display:flex;gap:16px;align-items:center">
@@ -507,13 +513,13 @@ function renderRecs() {
   const have = new Set(shelf.map((b) => b.id));
   $("out").innerHTML = lastRecs.map((b, i) => `
     <article class="rec">
-      ${b.cover ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">` : `<div class="cover"></div>`}
+      ${coverHtml(b)}
       <div>
         <h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
         <p>${esc(b.why)}</p>
         <div class="actions">
           <button class="btn" data-add="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
-          ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library. Pode ser uma web novel.</span>`}
+          ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library (web novels e edições raras costumam ficar de fora).</span>`}
           ${buyLinks(b)}
           <button class="link" data-cm="${i}">${openRecs.has(bookId(b)) ? "Ocultar comentários" : "Ver comentários"}</button>
         </div>
@@ -528,7 +534,7 @@ function renderRecs() {
 async function addBook(b) {
   if (!user) return openAuth();
   await setDoc(doc(db, "users", user.uid, "books", bookId(b)), {
-    title: b.title, author: b.author, cover: b.cover || "", link: b.link || "",
+    title: b.title, originalTitle: b.originalTitle || "", author: b.author, cover: b.cover || "", link: b.link || "",
     status: "quero", rating: 0, addedAt: serverTimestamp(), // vem de recomendação ou ranking: ainda não foi lido
   });
 }

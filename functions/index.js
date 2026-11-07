@@ -28,11 +28,13 @@ async function ask(text, tags, shelf, exclude) {
       "Nunca invente títulos. Cada livro deve atender a TODAS as características pedidas; " +
       "se uma exclui algo (ex.: 'sem poderes', 'sem sistema'), não sugira livros em que o protagonista tenha isso. " +
       "Só sugira obras cujo título e autor você conhece com certeza; se não tiver certeza do autor, não sugira. " +
-      "Use só o título principal, sem tradução ou nome original entre parênteses. " +
+      "Use só o título principal, sem nome original entre parênteses. " +
+      "Em 'title' coloque o título da edição brasileira só se tiver certeza de que ele existe; senão repita o título original. " +
+      "Em 'originalTitle' coloque o título original (no idioma em que a obra foi escrita, em alfabeto latino). " +
       "Em 'why', diga em uma frase como o livro atende ao pedido ou ao gosto do leitor. " +
       "Não use aspas duplas dentro dos textos. " +
       "Responda SOMENTE com um array JSON de 10 itens: " +
-      '[{"title":"","author":"","why":"uma frase em português"}].',
+      '[{"title":"","originalTitle":"","author":"","why":"uma frase em português"}].',
     messages: [{
       role: "user",
       content: `Pedido: ${text || "(nenhum; use o gosto da estante)"}\nCaracterísticas: ${tags.join(", ")}` +
@@ -47,7 +49,7 @@ async function ask(text, tags, shelf, exclude) {
       const raw = msg.content.find((c) => c.type === "text")?.text ?? "";
       if (!raw.includes("[")) throw new Error(`sem JSON: stop=${msg.stop_reason} ${JSON.stringify(msg.content).slice(0, 400)}`);
       const have = new Set([...shelf.map((b) => b.title), ...exclude].map(norm));
-      return JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1)).filter((b) => !have.has(norm(b.title)));
+      return JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1)).filter((b) => !have.has(norm(b.title)) && !have.has(norm(b.originalTitle)));
     } catch (e) {
       lastErr = e;
     }
@@ -80,10 +82,11 @@ async function checkLimit(uid) {
 
 // Confere o título no Open Library; só vale se título e autor baterem (senão pega a capa de outro livro). Sem match => verified:false (ex.: web novels)
 async function verify(b) {
-  const q = new URLSearchParams({ title: b.title, author: b.author, limit: 3, fields: "key,cover_i,title,author_name" });
+  const orig = b.originalTitle || b.title; // o Open Library indexa pelo título original
+  const q = new URLSearchParams({ title: orig, author: b.author, limit: 3, fields: "key,cover_i,title,author_name" });
   const r = await fetch(`https://openlibrary.org/search.json?${q}`);
   const docs = r.ok ? (await r.json()).docs ?? [] : [];
-  const t = norm(b.title);
+  const t = norm(orig);
   const last = norm(b.author.split(/\s+/).pop());
   const d = docs.find((x) => {
     const xt = norm(x.title);
