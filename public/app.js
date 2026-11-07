@@ -514,6 +514,7 @@ function renderRecs() {
         <div class="actions">
           <button class="btn" data-add="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
           ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library. Pode ser uma web novel.</span>`}
+          ${buyLinks(b)}
           <button class="link" data-cm="${i}">${openRecs.has(bookId(b)) ? "Ocultar comentários" : "Ver comentários"}</button>
         </div>
         <div class="rc" data-rc="${bookId(b)}" hidden></div>
