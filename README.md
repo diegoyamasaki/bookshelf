@@ -11,9 +11,10 @@ Site para recomendar livros com IA e montar uma estante pessoal.
 
 Firebase (Hosting, Auth, Firestore, Cloud Functions Node 22) e a API do Claude.
 
-- `public/index.html`: o site inteiro (HTML, CSS e JS).
-- `functions/index.js`: `recommend` (recomendação) e `refreshBestsellers` (agendada, 6h).
-- `firestore.rules`: regras de acesso.
+- `public/`: `index.html`, `style.css` e `app.js` (o site).
+- `functions/index.js`: `recommend` (recomendação, só logado), `deleteAccount` (exclusão de conta) e `refreshBestsellers` (agendada, 6h).
+- `firestore.rules` e `firestore.indexes.json`: regras de acesso e índices.
+- `tests/rules.test.js`: testes das regras no emulador (`npm install && npm test`, exige Java).
 
 ## Rodar e publicar
 

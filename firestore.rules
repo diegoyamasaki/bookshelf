@@ -1,9 +1,20 @@
 rules_version = '2';
 service cloud.firestore {
   match /databases/{db}/documents {
-    // Estante: o dono lê e escreve; outros usuários só leem se o perfil estiver público
+    // Estante: o dono lê e escreve; outros usuários só leem se o perfil estiver público.
+    // Capa só de hosts conhecidos: uma estante pública não pode apontar para um servidor alheio (rastreio de quem a abre).
     match /users/{uid}/books/{id} {
-      allow write: if request.auth != null && request.auth.uid == uid;
+      function validBook() {
+        let d = request.resource.data;
+        return d.title is string && d.title.size() <= 200 && d.author is string && d.author.size() <= 200
+          && d.get('cover', '') is string
+          && (d.get('cover', '') == '' || d.get('cover', '').matches('https://covers\\.openlibrary\\.org/.*') || d.get('cover', '').matches('https://static01\\.nyt\\.com/.*'))
+          && d.get('link', '') is string && (d.get('link', '') == '' || d.get('link', '').matches('https://.*'))
+          && d.get('status', 'lido') in ['lido', 'lendo', 'quero']
+          && d.get('rating', 0) is int && d.get('rating', 0) >= 0 && d.get('rating', 0) <= 5;
+      }
+      allow create, update: if request.auth != null && request.auth.uid == uid && validBook();
+      allow delete: if request.auth != null && request.auth.uid == uid;
       allow read: if request.auth != null && (request.auth.uid == uid
         || get(/databases/$(db)/documents/profiles/$(uid)).data.shelfPublic == true);
     }

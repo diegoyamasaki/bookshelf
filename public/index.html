@@ -4,116 +4,16 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Estante</title>
+<meta name="description" content="Peça recomendações de livros e web novels a uma IA e monte sua estante com status, notas e comentários.">
+<meta name="theme-color" content="#141a2e">
+<meta property="og:type" content="website">
+<meta property="og:title" content="Estante">
+<meta property="og:description" content="Recomendações de livros com IA e uma estante pessoal com status, notas e comentários.">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23141a2e'/%3E%3Crect x='18' y='22' width='16' height='56' rx='2' fill='%238c3b3b'/%3E%3Crect x='38' y='14' width='16' height='64' rx='2' fill='%23f2b84b'/%3E%3Crect x='58' y='26' width='16' height='52' rx='2' fill='%232f5d62'/%3E%3Crect x='12' y='78' width='76' height='6' rx='2' fill='%237a5638'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
 <link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Literata:ital,opsz,wght@0,7..72,400;1,7..72,400&display=swap" rel="stylesheet">
-<style>
-  :root{
-    --bg:#141a2e;--surface:#1d2540;--line:#333d63;--text:#ece8de;--muted:#a2a8c0;
-    --amber:#f2b84b;--wood:#7a5638;--wood-dark:#4d3322;
-    --ui:"Bricolage Grotesque",system-ui,sans-serif;--read:"Literata",Georgia,serif;
-  }
-  *{box-sizing:border-box}
-  body{margin:0;background:var(--bg);color:var(--text);font:16px/1.5 var(--ui)}
-  a{color:var(--amber)}
-  button,input,textarea{font:inherit;color:inherit}
-  :focus-visible{outline:2px solid var(--amber);outline-offset:2px}
-  .wrap{max-width:720px;margin:0 auto;padding:0 16px}
-  .wide{max-width:1100px;margin:0 auto;padding:0 16px}
-
-  header{display:flex;align-items:center;gap:24px;padding:20px 16px;max-width:1100px;margin:0 auto}
-  .logo{font-size:1.5rem;font-weight:700;letter-spacing:-.02em;margin-right:auto}
-  nav{display:flex;gap:4px}
-  nav button{background:none;border:0;padding:8px 12px;border-radius:8px;color:var(--muted);cursor:pointer}
-  nav button[aria-current="page"]{color:var(--text);background:var(--surface)}
-  .btn{background:var(--surface);border:1px solid var(--line);padding:8px 16px;border-radius:8px;cursor:pointer}
-  .btn:hover{border-color:var(--muted)}
-  .btn.main{background:var(--amber);border-color:var(--amber);color:#1b1608;font-weight:700}
-  .btn:disabled{opacity:.55;cursor:default}
-
-  h1{font-size:clamp(2rem,6vw,3.25rem);line-height:1.05;letter-spacing:-.03em;margin:48px 0 20px}
-  textarea{display:block;width:100%;resize:vertical;min-height:5em;max-height:50vh;padding:12px 14px;
-    background:var(--surface);border:1px solid var(--line);border-radius:10px}
-  .tags{display:flex;flex-wrap:wrap;gap:8px;margin:12px 0}
-  .tags label{padding:5px 12px;border:1px solid var(--line);border-radius:99px;cursor:pointer;color:var(--muted)}
-  .tags label:has(input:checked){background:var(--text);border-color:var(--text);color:var(--bg)}
-  .tags label:has(:focus-visible){outline:2px solid var(--amber);outline-offset:2px}
-  .tags input{position:absolute;opacity:0;pointer-events:none}
-  .note{color:var(--muted);margin:16px 0}
-
-  .rec{display:grid;grid-template-columns:84px 1fr;gap:16px;padding:20px 0;border-top:1px solid var(--line)}
-  .rec .cover{width:84px;height:126px;border-radius:4px;object-fit:cover;background:var(--surface)}
-  .rec h3{margin:0;font-size:1.15rem}
-  .rec .by{color:var(--muted)}
-  .rec p{font:400 1rem/1.65 var(--read);margin:8px 0 12px;max-width:60ch}
-  .rec .actions{display:flex;flex-wrap:wrap;gap:12px;align-items:center}
-  .unverified{color:var(--muted);font-size:.9rem}
-
-  h2{font-size:2rem;letter-spacing:-.02em;margin:40px 0 8px}
-  .shelf{display:flex;flex-wrap:wrap;align-items:flex-end;gap:0 3px;padding:24px 0 0;margin-bottom:40px}
-  .spine{position:relative;margin:0 0 14px;padding:12px 0;border:0;border-radius:3px 3px 0 0;color:#f5f1e8;cursor:pointer;
-    writing-mode:vertical-rl;font:700 .95rem var(--ui);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;
-    box-shadow:inset 3px 0 0 rgba(255,255,255,.12),inset -3px 0 0 rgba(0,0,0,.2);transition:transform .15s}
-  .shelf-item{position:relative;margin-bottom:0}
-  .shelf-item::after{content:"";position:absolute;left:-2px;right:-2px;bottom:0;height:14px;
-    background:linear-gradient(var(--wood),var(--wood-dark));border-radius:2px}
-  .shelf-item .spine{display:block;margin:0 0 14px}
-  .spine:hover,.spine[aria-expanded="true"]{transform:translateY(-10px)}
-  .detail{display:grid;grid-template-columns:84px 1fr;gap:16px;padding:20px;background:var(--surface);border-radius:12px;max-width:720px}
-  .detail[hidden]{display:none}
-  .detail .cover{width:84px;height:126px;border-radius:4px;object-fit:cover;background:var(--bg)}
-  .detail h3{margin:0}
-  .comments{grid-column:1/-1;border-top:1px solid var(--line);padding-top:16px}
-  .comments h4{margin:0 0 12px;font-size:1.1rem}
-  .comments textarea{min-height:4em}
-  .comments .row{display:flex;gap:12px;align-items:center;margin:8px 0 0;flex-wrap:wrap}
-  .comments input{padding:8px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px;width:12em}
-  .c{padding:14px 0;border-top:1px solid var(--line)}
-  .c b{margin-right:8px}
-  .c p{font:400 1rem/1.65 var(--read);margin:6px 0 8px;max-width:60ch;overflow-wrap:anywhere}
-  .like{background:none;border:1px solid var(--line);border-radius:99px;padding:2px 12px;cursor:pointer;color:var(--muted)}
-  .like[aria-pressed="true"]{color:var(--amber);border-color:var(--amber)}
-  .rc{margin-top:8px;max-width:60ch}
-  .top-grid{display:grid;grid-template-columns:repeat(auto-fit,minmax(300px,1fr));gap:32px;margin-top:24px}
-  .top-grid h3{margin:0 0 8px;font-size:1.3rem}
-  .top-grid ol{margin:0;padding-left:1.6em}
-  .top-grid li{padding:8px 0;border-top:1px solid var(--line)}
-  .top-grid li::marker{color:var(--muted)}
-  .top-grid .by{display:block}
-  .top-grid .syn{font:400 .95rem/1.6 var(--read);color:var(--muted);margin:6px 0 4px}
-  .top-grid .link,.top-grid .acts a{font-size:.9rem}
-  .top-grid .acts{display:flex;flex-wrap:wrap;gap:4px 16px;align-items:center}
-  .empty{max-width:46ch;color:var(--muted)}
-  #go-shelf{margin-left:8px}
-  .filters{display:flex;flex-wrap:wrap;gap:8px;margin:16px 0 0}
-  .chip{background:none;border:1px solid var(--line);border-radius:99px;padding:4px 14px;cursor:pointer;color:var(--muted)}
-  .chip[aria-pressed="true"]{background:var(--text);border-color:var(--text);color:var(--bg)}
-  .spine[data-status="quero"]{opacity:.55}
-  .spine[data-status="lendo"]{box-shadow:inset 3px 0 0 rgba(255,255,255,.12),inset -3px 0 0 rgba(0,0,0,.2),inset 0 5px 0 var(--amber)}
-  .seg{display:inline-flex;border:1px solid var(--line);border-radius:8px;overflow:hidden;margin:12px 0 4px}
-  .seg button{background:none;border:0;padding:6px 12px;cursor:pointer;color:var(--muted)}
-  .seg button[aria-pressed="true"]{background:var(--text);color:var(--bg)}
-  .stars button{background:none;border:0;padding:0 2px;font-size:1.5rem;line-height:1;color:var(--line);cursor:pointer}
-  .stars button[aria-pressed="true"]{color:var(--amber)}
-  .stars button:disabled{cursor:default}
-  .profile-box{background:var(--surface);padding:16px 20px;border-radius:12px;max-width:520px}
-  .profile-box h3{margin:0 0 8px}
-  .profile-box label{display:block;margin:10px 0}
-  .profile-box input[type="text"]{display:block;width:100%;margin-top:4px;padding:8px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
-  .profile-box .row{display:flex;gap:12px;align-items:center;flex-wrap:wrap}
-  .reader{display:flex;gap:16px;align-items:center;padding:12px 0;border-top:1px solid var(--line);max-width:520px}
-  .reader strong{margin-right:auto}
-
-  dialog{background:var(--surface);color:var(--text);border:1px solid var(--line);border-radius:14px;padding:24px;width:min(380px,calc(100vw - 32px))}
-  dialog::backdrop{background:rgba(8,10,20,.7)}
-  dialog h2{margin:0 0 16px;font-size:1.5rem}
-  dialog label{display:block;margin:12px 0 4px}
-  dialog input{width:100%;padding:10px 12px;background:var(--bg);border:1px solid var(--line);border-radius:8px}
-  dialog .row{display:flex;gap:12px;align-items:center;margin-top:20px}
-  .err{color:#ff9a8a;min-height:1.5em;margin:8px 0 0}
-  .link{background:none;border:0;color:var(--amber);cursor:pointer;padding:0;text-decoration:underline}
-  @media (prefers-reduced-motion:reduce){.spine{transition:none}}
-</style>
+<link rel="stylesheet" href="style.css">
 </head>
 <body>
 <header>
@@ -133,13 +33,15 @@
     <label for="text" class="note" style="display:block;margin:0 0 8px">Descreva o livro ou escolha características.</label>
     <textarea id="text" maxlength="500" placeholder="Ex.: web novel com segunda chance, protagonista sem poderes"></textarea>
     <div class="tags" id="tags"></div>
+    <p class="note" id="login-hint" style="margin:0 0 12px">Entre na sua conta para pedir recomendações.</p>
     <button class="btn main" id="go">Recomendar</button>
     <button class="btn" id="go-shelf" hidden>Recomendar pela minha estante</button>
     <div id="out" aria-live="polite"></div>
   </section>
 
   <section id="top" class="wide" hidden>
-    <h2>Best-sellers do New York Times</h2>
+    <p class="note" id="top-updated" style="margin:24px 0 0"></p>
+    <h2 style="margin-top:8px">Best-sellers do New York Times</h2>
     <p class="note">Listas da semana, nos EUA. As sinopses são traduzidas automaticamente. Fonte: <a href="https://www.nytimes.com/books/best-sellers/" target="_blank" rel="noopener">The New York Times Best Sellers</a>.</p>
     <div id="nyt-area" class="top-grid"></div>
     <h2>Mais lidos por gênero</h2>
@@ -158,6 +60,8 @@
   </section>
 </main>
 
+<footer><button class="link" id="privacy-btn">Privacidade e dados</button></footer>
+
 <dialog id="auth-dlg">
   <form id="auth-form" method="dialog">
     <h2 id="auth-title">Entrar</h2>
@@ -166,6 +70,7 @@
     <label for="pass">Senha</label>
     <input id="pass" type="password" autocomplete="current-password" minlength="6" required>
     <p class="err" id="auth-err" role="alert"></p>
+    <button type="button" class="link" id="auth-reset" style="margin-bottom:12px">Esqueci a senha</button>
     <button type="button" class="btn" id="google-btn" hidden style="width:100%;margin-bottom:12px">Entrar com Google</button>
     <div class="row">
       <button class="btn main" id="auth-submit" type="submit">Entrar</button>
@@ -175,498 +80,32 @@
   </form>
 </dialog>
 
-<script type="module">
-import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
-import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile, GoogleAuthProvider, signInWithPopup }
-  from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, query, where, limit, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove }
-  from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
+<dialog id="privacy-dlg">
+  <h2>Privacidade e dados</h2>
+  <h3>O que guardamos</h3>
+  <p>Seu e-mail e nome (login pelo Firebase, do Google), sua estante (livros, status e nota), seus comentários e curtidas e quem você segue.</p>
+  <h3>O que é público</h3>
+  <p>Seus comentários, com o nome que você escolheu. Sua estante e seu nome na lista de Leitores só ficam visíveis se você ativar isso no perfil. O resto é privado.</p>
+  <h3>Com quem os dados passam</h3>
+  <ul>
+    <li>Google Firebase: hospedagem, login e banco de dados.</li>
+    <li>Anthropic (Claude): recebe o texto do seu pedido e, na recomendação pela estante, os títulos, status e notas dos seus livros. Não recebe seu e-mail nem seu nome.</li>
+    <li>Open Library e New York Times: só fornecem listas e informações de livros.</li>
+  </ul>
+  <h3>Por quanto tempo</h3>
+  <p>Até você excluir a conta.</p>
+  <h3>Seus direitos</h3>
+  <p>Você vê tudo no próprio site, corrige o perfil e os comentários quando quiser e pode excluir tudo abaixo: estante, comentários, curtidas, seguidos, perfil e o login.</p>
+  <div id="delete-box" hidden>
+    <label for="delete-confirm">Para excluir, digite EXCLUIR</label>
+    <input id="delete-confirm" autocomplete="off">
+    <p class="err" id="delete-err" role="alert"></p>
+    <div class="row"><button class="danger" id="delete-btn" disabled>Excluir minha conta e meus dados</button>
+      <button class="link" id="privacy-close" type="button" style="margin-left:auto">Fechar</button></div>
+  </div>
+  <div class="row" id="privacy-only-close"><button class="link" id="privacy-close2" type="button" style="margin-left:auto">Fechar</button></div>
+</dialog>
 
-// Chave web do Firebase: pública por design; o acesso é protegido por firestore.rules
-const app = initializeApp({
-  apiKey: "AIzaSyDu2lswJqWM4OWF_jeLIR2hHOIVTooyvdo",
-  authDomain: "bookshelf-diego-2611.firebaseapp.com",
-  projectId: "bookshelf-diego-2611",
-  appId: "1:1027024406136:web:c1aa3f0d723e37e3b48f8d",
-});
-const auth = getAuth(app);
-const db = getFirestore(app);
-
-const $ = (id) => document.getElementById(id);
-const esc = (s = "") => String(s).replace(/[&<>"']/g, (c) => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;" }[c]));
-const safeUrl = (u) => (/^https:\/\//.test(u || "") ? esc(u) : "");
-const bookId = (b) => (b.title + " " + b.author).toLowerCase().replace(/[^a-z0-9]+/g, "-").slice(0, 120);
-
-let user = null;
-let shelf = []; // livros da estante do usuário
-let unsub = null;
-let selected = null;
-let lastRecs = [];
-let cUnsub = null; // listener dos comentários do livro aberto
-let myComment = null;
-
-// --- abas
-const TABS = ["recomendar", "estante", "top", "leitores"];
-function showTab(name) {
-  for (const s of TABS) $(s).hidden = s !== name;
-  document.querySelectorAll("nav button").forEach((b) =>
-    b.dataset.tab === name ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
-  history.replaceState(null, "", "#" + name);
-  if (name === "top") loadTop();
-  if (name === "estante") renderShelf();
-  if (name === "leitores") { readersCache = null; renderReaders(); }
-}
-document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
-
-// --- login
-let signingUp = false;
-function authMode(up) {
-  signingUp = up;
-  $("auth-title").textContent = up ? "Criar conta" : "Entrar";
-  $("auth-submit").textContent = up ? "Criar conta" : "Entrar";
-  $("auth-switch").textContent = up ? "Já tenho conta" : "Criar conta";
-  $("pass").autocomplete = up ? "new-password" : "current-password";
-  $("auth-err").textContent = "";
-}
-function openAuth() { authMode(false); $("auth-dlg").showModal(); $("email").focus(); }
-$("auth-btn").onclick = () => (user ? signOut(auth) : openAuth());
-$("auth-switch").onclick = () => authMode(!signingUp);
-$("auth-close").onclick = () => $("auth-dlg").close();
-const AUTH_ERR = {
-  "auth/invalid-credential": "E-mail ou senha incorretos.",
-  "auth/email-already-in-use": "Já existe uma conta com esse e-mail. Use Entrar.",
-  "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
-  "auth/invalid-email": "Esse e-mail não parece válido.",
-  "auth/too-many-requests": "Muitas tentativas. Espere um pouco e tente de novo.",
-};
-$("auth-form").onsubmit = async (e) => {
-  e.preventDefault();
-  try {
-    const fn = signingUp ? createUserWithEmailAndPassword : signInWithEmailAndPassword;
-    await fn(auth, $("email").value, $("pass").value);
-    $("auth-dlg").close();
-    $("auth-form").reset();
-  } catch (err) {
-    $("auth-err").textContent = AUTH_ERR[err.code] || "Não foi possível entrar. Tente de novo.";
-  }
-};
-
-let pUnsub = null;
-let fUnsub = null;
-// Ligue depois de ativar o Google em Authentication > Sign-in method no console do Firebase
-const GOOGLE_LOGIN = true;
-$("google-btn").hidden = !GOOGLE_LOGIN;
-$("google-btn").onclick = async () => {
-  try {
-    await signInWithPopup(auth, new GoogleAuthProvider());
-    $("auth-dlg").close();
-  } catch (err) {
-    if (err.code !== "auth/popup-closed-by-user") $("auth-err").textContent = "Não foi possível entrar com o Google. Tente de novo.";
-  }
-};
-
-onAuthStateChanged(auth, (u) => {
-  user = u;
-  $("auth-btn").textContent = u ? "Sair" : "Entrar";
-  [unsub, pUnsub, fUnsub, rUnsub].forEach((f) => f?.());
-  shelf = [];
-  selected = null;
-  myProfile = null;
-  following = new Set();
-  readersCache = null;
-  readerView = null;
-  if (u) {
-    unsub = onSnapshot(collection(db, "users", u.uid, "books"), (snap) => {
-      shelf = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
-      syncShelfBtn();
-      renderShelf();
-      renderRecs();
-      renderTop();
-    });
-    pUnsub = onSnapshot(doc(db, "profiles", u.uid), (d) => { myProfile = d.data() ?? null; });
-    fUnsub = onSnapshot(collection(db, "users", u.uid, "following"), (snap) => {
-      following = new Set(snap.docs.map((d) => d.id));
-      if ($("leitores").hidden) return;
-      if (readerView) renderReaders(); else if ($("readers-list")) loadReadersList();
-    });
-  }
-  syncShelfBtn();
-  renderShelf();
-  renderRecs();
-  renderTop();
-  renderReaders();
-});
-
-// --- estante
-const COLORS = ["#8c3b3b", "#2f5d62", "#6b5b95", "#a87631", "#3d6b4f", "#a24f78"];
-const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-const STATUS = { lido: "Lido", lendo: "Lendo", quero: "Quero ler" };
-const statusOf = (b) => b.status || "lido"; // livros antigos não têm status
-let filter = "todos";
-
-const stars = (rating, editable) => [1, 2, 3, 4, 5].map((n) =>
-  `<button ${editable ? `data-r="${n}"` : "disabled"} aria-pressed="${n <= rating}" aria-label="${n} de 5">★</button>`).join("");
-
-function shelfHtml(books, sel) {
-  const count = (k) => books.filter((b) => k === "todos" || statusOf(b) === k).length;
-  const chips = ["todos", "lido", "lendo", "quero"].map((k) =>
-    `<button class="chip" data-f="${k}" aria-pressed="${filter === k}">${k === "todos" ? "Todos" : STATUS[k]} (${count(k)})</button>`).join("");
-  const shown = books.filter((b) => filter === "todos" || statusOf(b) === filter);
-  const spines = shown.map((b) => {
-    const h = hash(b.id);
-    return `<div class="shelf-item"><button class="spine" data-id="${esc(b.id)}" data-status="${statusOf(b)}" aria-expanded="${sel === b.id}"
-      title="${esc(b.title)}" style="background:${COLORS[h % COLORS.length]};height:${150 + (h % 60)}px;width:${38 + (h % 14)}px">${esc(b.title)}</button></div>`;
-  }).join("");
-  return `<div class="filters">${chips}</div>${shown.length ? `<div class="shelf">${spines}</div>` : `<p class="empty" style="margin-top:24px">Nenhum livro com esse status.</p>`}<div class="detail" hidden></div>`;
-}
-
-function detailHtml(b, mine) {
-  const status = statusOf(b);
-  const controls = mine
-    ? `<div class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${status === k}">${v}</button>`).join("")}</div>
-       <div class="stars" role="group" aria-label="Sua nota">${stars(b.rating || 0, true)}</div>`
-    : `<div class="note" style="margin:8px 0 0">${STATUS[status]}</div><div class="stars" role="img" aria-label="Nota ${b.rating || 0} de 5">${stars(b.rating || 0, false)}</div>`;
-  return `${b.cover ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">` : `<div class="cover"></div>`}
-    <div><h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
-      ${controls}
-      <p style="margin:12px 0;display:flex;gap:16px;align-items:center">
-        ${safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : ""}
-        ${mine ? `<button class="btn remove">Remover da estante</button>` : ""}</p></div>
-    <div class="comments">
-      <h4>Comentários</h4>
-      ${mine ? `${user.displayName ? "" : `<input class="c-name" maxlength="40" placeholder="Seu nome" aria-label="Seu nome" style="margin-bottom:8px">`}
-        <textarea class="c-text" maxlength="500" placeholder="O que você achou deste livro?" aria-label="Seu comentário"></textarea>
-        <div class="row"><button class="btn main c-save">Publicar comentário</button>
-          <button class="link c-del" hidden>Excluir meu comentário</button><span class="err c-err" role="alert"></span></div>` : ""}
-      <div class="c-list"></div>
-    </div>`;
-}
-
-// Desenha uma estante (a minha, editável, ou a de outro leitor, só leitura) e liga os comentários do livro aberto
-function drawShelf(area, books, sel, onSel, mine) {
-  cUnsub?.();
-  cUnsub = null;
-  const draft = area.dataset.sel === sel ? area.querySelector(".c-text")?.value : ""; // não perder o rascunho ao mudar status/nota
-  area.dataset.sel = sel ?? "";
-  area.innerHTML = shelfHtml(books, sel);
-  area.querySelectorAll(".chip").forEach((c) => (c.onclick = () => { filter = c.dataset.f; onSel(null); }));
-  area.querySelectorAll(".spine").forEach((s) => (s.onclick = () => onSel(sel === s.dataset.id ? null : s.dataset.id)));
-  const b = books.find((x) => x.id === sel);
-  const d = area.querySelector(".detail");
-  if (!b || !d) return;
-  d.hidden = false;
-  d.innerHTML = detailHtml(b, mine);
-  if (mine) {
-    const ref = doc(db, "users", user.uid, "books", b.id);
-    d.querySelector(".remove").onclick = async () => { onSel(null); await deleteDoc(ref); };
-    d.querySelectorAll("[data-s]").forEach((x) => (x.onclick = () => updateDoc(ref, { status: x.dataset.s })));
-    d.querySelectorAll("[data-r]").forEach((x) => (x.onclick = () => {
-      const n = Number(x.dataset.r);
-      updateDoc(ref, { rating: n === (b.rating || 0) ? 0 : n }); // tocar na mesma nota limpa
-    }));
-    d.querySelector(".c-save").onclick = () => saveComment(d, b);
-    d.querySelector(".c-del").onclick = () => deleteDoc(doc(db, "books", b.id, "comments", user.uid));
-    if (draft) d.querySelector(".c-text").value = draft;
-  }
-  d.querySelector(".c-list").onclick = (e) => {
-    const btn = e.target.closest(".like");
-    if (btn) updateDoc(doc(db, "books", b.id, "comments", btn.dataset.uid),
-      { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-  };
-  cUnsub = onSnapshot(collection(db, "books", b.id, "comments"), (snap) => renderComments(d, snap.docs.map((x) => x.data()), mine));
-}
-
-function renderShelf() {
-  if ($("estante").hidden) return; // evita mexer nos comentários abertos em outra aba
-  const area = $("shelf-area");
-  if (!user) {
-    cUnsub?.();
-    area.innerHTML = `<p class="empty">Entre para montar sua estante e guardar os livros que você já leu.</p><button class="btn main" id="shelf-login">Entrar</button>`;
-    $("shelf-login").onclick = openAuth;
-    return;
-  }
-  if (!shelf.length) {
-    cUnsub?.();
-    area.innerHTML = `<p class="empty">Sua estante está vazia. Peça uma recomendação, ou veja os mais lidos, e use Adicionar à estante.</p>`;
-    return;
-  }
-  drawShelf(area, shelf, selected, (id) => { selected = id; renderShelf(); }, true);
-}
-
-// --- comentários
-function commentsHtml(list) {
-  const n = (c) => new Set(c.likes).size;
-  list.sort((a, b) => n(b) - n(a) || (a.createdAt?.seconds ?? 1e12) - (b.createdAt?.seconds ?? 1e12));
-  return list.length ? list.map((c) => {
-    const liked = c.likes.includes(user.uid);
-    return `<div class="c"><b>${esc(c.name)}</b><p>${esc(c.text)}</p>
-      <button class="like" data-uid="${esc(c.uid)}" aria-pressed="${liked}" aria-label="${liked ? "Descurtir" : "Curtir"} comentário de ${esc(c.name)}">♥ ${n(c)}</button></div>`;
-  }).join("") : `<p class="note">Ninguém comentou este livro ainda.</p>`;
-}
-
-function renderComments(d, list, mine) {
-  if (mine) {
-    myComment = list.find((c) => c.uid === user.uid) || null;
-    const text = d.querySelector(".c-text");
-    if (myComment && !text.value) text.value = myComment.text;
-    d.querySelector(".c-save").textContent = myComment ? "Atualizar comentário" : "Publicar comentário";
-    d.querySelector(".c-del").hidden = !myComment;
-  }
-  d.querySelector(".c-list").innerHTML = commentsHtml(list);
-}
-
-async function saveComment(d, b) {
-  const text = d.querySelector(".c-text").value.trim();
-  const name = user.displayName || d.querySelector(".c-name")?.value.trim();
-  const err = d.querySelector(".c-err");
-  err.textContent = "";
-  if (!text) { err.textContent = "Escreva um comentário antes de publicar."; return; }
-  if (!name) { err.textContent = "Diga seu nome para aparecer nos comentários."; return; }
-  try {
-    if (!user.displayName) await updateProfile(user, { displayName: name });
-    const ref = doc(db, "books", b.id, "comments", user.uid);
-    if (myComment) await updateDoc(ref, { text, name });
-    else await setDoc(ref, { uid: user.uid, name, text, likes: [], createdAt: serverTimestamp() });
-  } catch (e) {
-    err.textContent = "Não foi possível publicar. Tente de novo.";
-  }
-}
-
-// --- leitores: perfil público, seguir e ver a estante dos outros
-let myProfile = null;
-let following = new Set();
-let readersCache = null;
-let readersTab = "todos";
-let readerView = null; // { uid, name } do leitor aberto
-let readerBooks = [];
-let rSel = null;
-let rUnsub = null;
-
-function renderReaders() {
-  if ($("leitores").hidden) return;
-  const area = $("readers-area");
-  if (!user) {
-    area.innerHTML = `<p class="empty">Entre para ver outros leitores e as estantes públicas deles.</p><button class="btn main" id="readers-login">Entrar</button>`;
-    $("readers-login").onclick = openAuth;
-    return;
-  }
-  if (readerView) return renderReader(area);
-  area.innerHTML = `<form class="profile-box" id="profile-form">
-      <h3>Meu perfil</h3>
-      <label>Nome<input type="text" id="p-name" maxlength="40" value="${esc(myProfile?.name ?? user.displayName ?? "")}"></label>
-      <label><input type="checkbox" id="p-public" ${myProfile?.shelfPublic ? "checked" : ""}> Deixar minha estante pública: outros leitores poderão vê-la e me seguir</label>
-      <div class="row"><button class="btn main" type="submit">Salvar perfil</button><span class="note" id="p-msg" role="status" style="margin:0"></span></div>
-    </form>
-    <div class="filters">${["todos", "seguindo"].map((k) =>
-      `<button class="chip" data-rt="${k}" aria-pressed="${readersTab === k}">${k === "todos" ? "Todos" : "Seguindo"}</button>`).join("")}</div>
-    <div id="readers-list"><p class="note">Carregando.</p></div>`;
-  area.querySelectorAll("[data-rt]").forEach((c) => (c.onclick = () => { readersTab = c.dataset.rt; renderReaders(); }));
-  $("profile-form").onsubmit = async (e) => {
-    e.preventDefault();
-    const name = $("p-name").value.trim();
-    const pub = $("p-public").checked;
-    const msg = $("p-msg");
-    if (pub && !name) { msg.textContent = "Escreva um nome para tornar sua estante pública."; return; }
-    try {
-      await setDoc(doc(db, "profiles", user.uid), { name, shelfPublic: pub });
-      if (name && name !== user.displayName) await updateProfile(user, { displayName: name });
-      msg.textContent = "Perfil salvo.";
-    } catch {
-      msg.textContent = "Não foi possível salvar. Tente de novo.";
-    }
-  };
-  loadReadersList();
-}
-
-async function loadReadersList() {
-  const box = $("readers-list");
-  try {
-    readersCache ??= (await getDocs(query(collection(db, "profiles"), where("shelfPublic", "==", true), limit(100))))
-      .docs.map((d) => ({ uid: d.id, ...d.data() })).filter((r) => r.uid !== user.uid);
-  } catch {
-    box.innerHTML = `<p class="note">Não foi possível carregar os leitores. Recarregue a página.</p>`;
-    return;
-  }
-  const list = readersCache.filter((r) => readersTab === "todos" || following.has(r.uid));
-  box.innerHTML = list.length ? list.map((r) => `<div class="reader"><strong>${esc(r.name)}</strong>
-      <button class="link" data-view="${esc(r.uid)}">Ver estante</button>
-      <button class="btn" data-follow="${esc(r.uid)}">${following.has(r.uid) ? "Seguindo" : "Seguir"}</button></div>`).join("")
-    : `<p class="note">${readersTab === "seguindo" ? "Você ainda não segue ninguém." : "Ainda não há outros leitores com estante pública."}</p>`;
-  box.onclick = (e) => {
-    const v = e.target.closest("[data-view]");
-    const f = e.target.closest("[data-follow]");
-    if (v) openReader(readersCache.find((r) => r.uid === v.dataset.view));
-    if (f) toggleFollow(f.dataset.follow);
-  };
-}
-
-const toggleFollow = (uid) => following.has(uid)
-  ? deleteDoc(doc(db, "users", user.uid, "following", uid))
-  : setDoc(doc(db, "users", user.uid, "following", uid), { at: serverTimestamp() });
-
-function openReader(r) {
-  rUnsub?.();
-  readerView = r;
-  rSel = null;
-  readerBooks = [];
-  rUnsub = onSnapshot(collection(db, "users", r.uid, "books"), (snap) => {
-    readerBooks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
-    renderReaders();
-  }, () => { readerBooks = null; renderReaders(); }); // sem permissão: a pessoa deixou a estante privada
-  renderReaders();
-}
-
-function renderReader(area) {
-  area.innerHTML = `<button class="link" id="r-back">Voltar para leitores</button>
-    <h3 style="margin:16px 0 8px;font-size:1.5rem">${esc(readerView.name)}</h3>
-    <button class="btn" id="r-follow">${following.has(readerView.uid) ? "Seguindo" : "Seguir"}</button>
-    <div id="reader-shelf" style="margin-top:8px"></div>`;
-  $("r-back").onclick = () => { rUnsub?.(); rUnsub = null; cUnsub?.(); cUnsub = null; readerView = null; renderReaders(); };
-  $("r-follow").onclick = () => toggleFollow(readerView.uid);
-  const box = $("reader-shelf");
-  if (readerBooks === null) box.innerHTML = `<p class="empty">Esta estante não está mais pública.</p>`;
-  else if (!readerBooks.length) box.innerHTML = `<p class="empty">Esta estante ainda está vazia.</p>`;
-  else drawShelf(box, readerBooks, rSel, (id) => { rSel = id; renderReaders(); }, false);
-}
-
-// --- mais lidos (carregados do Firestore, atualizados 1x por dia pela função refreshBestsellers)
-let topData = null;
-let nytData = null;
-let topLoading = false;
-
-async function loadTop() {
-  if (topData || topLoading) return;
-  topLoading = true;
-  $("top-area").innerHTML = `<p class="note">Carregando os rankings.</p>`;
-  $("nyt-area").innerHTML = "";
-  try {
-    const d = (await getDoc(doc(db, "public", "bestsellers"))).data();
-    nytData = d?.lists ?? [];
-    topData = d?.genres ?? [];
-  } catch {
-    nytData = [];
-    topData = [];
-  }
-  topLoading = false;
-  renderTop();
-}
-
-// Busca pelo título em português (quando conhecido) e autor: o link direto do NYT leva à Amazon dos EUA
-function buyLinks(b) {
-  const q = encodeURIComponent(`${b.titlePt || b.title} ${b.author}`);
-  return `<a href="https://www.amazon.com.br/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon Brasil</a>
-    <a href="https://www.google.com/search?tbm=shop&q=${q}" target="_blank" rel="noopener">Google Shopping</a>`;
-}
-
-function renderTop() {
-  if (!topData) return;
-  const have = new Set(shelf.map((b) => b.id));
-  const list = (lists, attr, empty) => lists.length
-    ? lists.map((l, li) => `<div><h3>${esc(l.name)}</h3><ol>${l.books.map((b, i) => `<li><strong>${esc(b.titlePt || b.title)}</strong>${b.titlePt ? `<span class="by">Título original: ${esc(b.title)}</span>` : ""}
-        <span class="by">${esc(b.author)}${b.weeks > 1 ? `, ${b.weeks} semanas na lista` : ""}</span>
-        ${b.synopsis ? `<p class="syn">${esc(b.synopsis)}</p>` : ""}
-        <span class="acts"><button class="link" data-${attr}="${li}" data-i="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
-        ${buyLinks(b)}</span></li>`).join("")}</ol></div>`).join("")
-    : `<p class="note">${empty}</p>`;
-  $("nyt-area").innerHTML = list(nytData, "n", "Não foi possível carregar os best-sellers. Recarregue a página.");
-  $("top-area").innerHTML = list(topData, "g", "Não foi possível carregar os rankings. Recarregue a página.");
-}
-$("nyt-area").onclick = (e) => {
-  const b = e.target.closest("[data-n]");
-  if (b) addBook(nytData[b.dataset.n].books[b.dataset.i]);
-};
-$("top-area").onclick = (e) => {
-  const b = e.target.closest("[data-g]");
-  if (b) addBook(topData[b.dataset.g].books[b.dataset.i]);
-};
-
-// --- recomendações
-const TAGS = ["segunda chance", "sem poderes", "sem sistema", "reencarnação", "fantasia", "romance", "ficção científica", "mistério"];
-$("tags").innerHTML = TAGS.map((t) => `<label><input type="checkbox" value="${t}">${t}</label>`).join("");
-
-const openRecs = new Set(); // livros recomendados com comentários abertos
-const recUnsubs = new Map();
-
-function watchRec(id) {
-  recUnsubs.get(id)?.();
-  const box = $("out").querySelector(`[data-rc="${id}"]`);
-  if (!box) return;
-  recUnsubs.set(id, onSnapshot(collection(db, "books", id, "comments"),
-    (snap) => { box.hidden = false; box.innerHTML = commentsHtml(snap.docs.map((d) => d.data())); },
-    () => { box.hidden = false; box.innerHTML = `<p class="note">Não foi possível carregar os comentários.</p>`; }));
-}
-
-function toggleRecComments(b) {
-  if (!user) return openAuth();
-  const id = bookId(b);
-  if (openRecs.delete(id)) { renderRecs(); return; }
-  openRecs.add(id);
-  renderRecs();
-}
-
-$("out").onclick = (e) => {
-  const btn = e.target.closest(".like");
-  if (btn && user) updateDoc(doc(db, "books", btn.closest("[data-rc]").dataset.rc, "comments", btn.dataset.uid),
-    { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-};
-
-function renderRecs() {
-  recUnsubs.forEach((u) => u());
-  recUnsubs.clear();
-  if (!lastRecs.length) return;
-  const have = new Set(shelf.map((b) => b.id));
-  $("out").innerHTML = lastRecs.map((b, i) => `
-    <article class="rec">
-      ${b.cover ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">` : `<div class="cover"></div>`}
-      <div>
-        <h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
-        <p>${esc(b.why)}</p>
-        <div class="actions">
-          <button class="btn" data-add="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
-          ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library. Pode ser uma web novel.</span>`}
-          <button class="link" data-cm="${i}">${openRecs.has(bookId(b)) ? "Ocultar comentários" : "Ver comentários"}</button>
-        </div>
-        <div class="rc" data-rc="${bookId(b)}" hidden></div>
-      </div>
-    </article>`).join("");
-  $("out").querySelectorAll("[data-add]").forEach((btn) => (btn.onclick = () => addBook(lastRecs[btn.dataset.add])));
-  $("out").querySelectorAll("[data-cm]").forEach((btn) => (btn.onclick = () => toggleRecComments(lastRecs[btn.dataset.cm])));
-  if (user) openRecs.forEach((id) => watchRec(id)); else openRecs.clear();
-}
-
-async function addBook(b) {
-  if (!user) return openAuth();
-  await setDoc(doc(db, "users", user.uid, "books", bookId(b)), {
-    title: b.title, author: b.author, cover: b.cover || "", link: b.link || "",
-    status: "quero", rating: 0, addedAt: serverTimestamp(), // vem de recomendação ou ranking: ainda não foi lido
-  });
-}
-
-const syncShelfBtn = () => { $("go-shelf").hidden = !(user && shelf.length); };
-
-async function recommend(useShelf) {
-  const tags = [...document.querySelectorAll("#tags input:checked")].map((i) => i.value);
-  if (!useShelf && !$("text").value.trim() && !tags.length) { $("out").innerHTML = `<p class="note">Escreva o que procura ou escolha uma característica.</p>`; return; }
-  $("go").disabled = $("go-shelf").disabled = true;
-  $("out").innerHTML = `<p class="note">Procurando. Isso leva até 15 segundos.</p>`;
-  try {
-    const body = { text: $("text").value, tags, idToken: user ? await user.getIdToken() : undefined };
-    if (useShelf) body.shelf = shelf.slice(-40).map(({ title, author, status, rating }) => ({ title, author, status: status || "lido", rating: rating || 0 }));
-    const r = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    lastRecs = data;
-    renderRecs();
-  } catch (e) {
-    $("out").innerHTML = `<p class="note">${esc(e.message)}</p>`;
-  } finally {
-    $("go").disabled = $("go-shelf").disabled = false;
-  }
-}
-$("go").onclick = () => recommend(false);
-$("go-shelf").onclick = () => recommend(true);
-
-showTab(TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "recomendar");
-</script>
+<script type="module" src="app.js"></script>
 </body>
 </html>

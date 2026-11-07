@@ -2,9 +2,8 @@ const { onRequest } = require("firebase-functions/v2/https");
 const { defineSecret } = require("firebase-functions/params");
 const { onSchedule } = require("firebase-functions/v2/scheduler");
 const { initializeApp } = require("firebase-admin/app");
-const { getFirestore } = require("firebase-admin/firestore");
+const { getFirestore, FieldValue } = require("firebase-admin/firestore");
 const { getAuth } = require("firebase-admin/auth");
-const crypto = require("crypto");
 const Anthropic = require("@anthropic-ai/sdk");
 
 initializeApp();
@@ -13,9 +12,9 @@ const key = defineSecret("ANTHROPIC_API_KEY");
 const nytKey = defineSecret("NYT_API_KEY");
 
 const STATUS = { lido: "lido", lendo: "lendo agora", quero: "quer ler" };
-const norm = (t = "") => t.toLowerCase().replace(/[^a-z0-9]+/g, "");
+const norm = (t = "") => t.normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "");
 
-async function ask(text, tags, shelf) {
+async function ask(text, tags, shelf, exclude) {
   const client = new Anthropic({ apiKey: key.value() });
   const lines = shelf.map((b) => `- ${b.title} (${b.author}): ${STATUS[b.status]}${b.rating ? `, nota ${b.rating}/5` : ""}`).join("\n");
   const request = {
@@ -37,7 +36,8 @@ async function ask(text, tags, shelf) {
     messages: [{
       role: "user",
       content: `Pedido: ${text || "(nenhum; use o gosto da estante)"}\nCaracterísticas: ${tags.join(", ")}` +
-        (shelf.length ? `\n\nEstante do leitor. Notas 4 e 5 indicam que gostou, 1 e 2 que não gostou. NÃO recomende livros desta lista:\n${lines}` : ""),
+        (shelf.length ? `\n\nEstante do leitor. Notas 4 e 5 indicam que gostou, 1 e 2 que não gostou. NÃO recomende livros desta lista:\n${lines}` : "") +
+        (!shelf.length && exclude.length ? `\n\nO leitor já tem estes livros, NÃO os recomende:\n${exclude.map((t) => `- ${t}`).join("\n")}` : ""),
     }],
   };
   let lastErr;
@@ -46,7 +46,7 @@ async function ask(text, tags, shelf) {
       const msg = await client.messages.create(request);
       const raw = msg.content.find((c) => c.type === "text")?.text ?? "";
       if (!raw.includes("[")) throw new Error(`sem JSON: stop=${msg.stop_reason} ${JSON.stringify(msg.content).slice(0, 400)}`);
-      const have = new Set(shelf.map((b) => norm(b.title)));
+      const have = new Set([...shelf.map((b) => b.title), ...exclude].map(norm));
       return JSON.parse(raw.slice(raw.indexOf("["), raw.lastIndexOf("]") + 1)).filter((b) => !have.has(norm(b.title)));
     } catch (e) {
       lastErr = e;
@@ -55,31 +55,40 @@ async function ask(text, tags, shelf) {
   throw lastErr;
 }
 
-// Limite diário de recomendações: 30 por usuário logado, 5 por IP sem login (cada uma custa uma chamada ao Claude)
-async function who(req) {
+// Só usuário logado recomenda (cada pedido custa uma chamada ao Claude): 30 por dia por pessoa e um teto global por dia
+const USER_LIMIT = 30;
+const GLOBAL_LIMIT = 300;
+async function uidOf(req) {
   const token = req.body?.idToken;
-  if (token) {
-    try { return { id: (await getAuth().verifyIdToken(token)).uid, limit: 30 }; } catch {}
-  }
-  const ip = (req.get("x-forwarded-for") || req.ip || "").split(",")[0].trim();
-  return { id: "ip-" + crypto.createHash("sha256").update(ip).digest("hex").slice(0, 16), limit: 5 };
+  if (!token) return null;
+  try { return (await getAuth().verifyIdToken(token)).uid; } catch { return null; }
 }
-async function underLimit({ id, limit }) {
+async function checkLimit(uid) {
   const db = getFirestore();
-  const ref = db.doc(`usage/${id}_${new Date().toISOString().slice(0, 10)}`);
+  const day = new Date().toISOString().slice(0, 10);
+  const mine = db.doc(`usage/${uid}_${day}`);
+  const all = db.doc(`usage/global_${day}`);
   return db.runTransaction(async (t) => {
-    const n = (await t.get(ref)).data()?.n ?? 0;
-    if (n >= limit) return false;
-    t.set(ref, { n: n + 1 });
-    return true;
+    const [m, g] = (await Promise.all([t.get(mine), t.get(all)])).map((x) => x.data()?.n ?? 0);
+    if (g >= GLOBAL_LIMIT) return "global";
+    if (m >= USER_LIMIT) return "user";
+    t.set(mine, { n: m + 1 });
+    t.set(all, { n: g + 1 });
+    return "ok";
   });
 }
 
-// Confere o título no Open Library; sem resultado => verified:false (ex.: web novels)
+// Confere o título no Open Library; só vale se título e autor baterem (senão pega a capa de outro livro). Sem match => verified:false (ex.: web novels)
 async function verify(b) {
-  const q = new URLSearchParams({ title: b.title, author: b.author, limit: 1, fields: "key,cover_i" });
+  const q = new URLSearchParams({ title: b.title, author: b.author, limit: 3, fields: "key,cover_i,title,author_name" });
   const r = await fetch(`https://openlibrary.org/search.json?${q}`);
-  const d = r.ok ? (await r.json()).docs?.[0] : null;
+  const docs = r.ok ? (await r.json()).docs ?? [] : [];
+  const t = norm(b.title);
+  const last = norm(b.author.split(/\s+/).pop());
+  const d = docs.find((x) => {
+    const xt = norm(x.title);
+    return t && xt && (xt.includes(t) || t.includes(xt)) && last && norm((x.author_name || []).join(" ")).includes(last);
+  });
   if (!d) return { ...b, verified: false };
   return {
     ...b,
@@ -96,15 +105,38 @@ exports.recommend = onRequest({ secrets: [key], cors: true }, async (req, res) =
     title: String(b.title || "").slice(0, 100), author: String(b.author || "").slice(0, 100),
     status: STATUS[b.status] ? b.status : "lido", rating: Math.min(5, Math.max(0, Number(b.rating) || 0)),
   }));
+  const exclude = (Array.isArray(req.body?.exclude) ? req.body.exclude : []).slice(0, 100).map((t) => String(t).slice(0, 100));
   if (!text && !tags.length && !shelf.length) return res.status(400).json({ error: "Descreva o que procura." });
   try {
-    if (!(await underLimit(await who(req)))) {
-      return res.status(429).json({ error: "Você atingiu o limite de recomendações de hoje. Volte amanhã" + (req.body?.idToken ? "." : " ou entre na sua conta para ter mais.") });
-    }
-    res.json(await Promise.all((await ask(text, tags, shelf)).map(verify)));
+    const uid = await uidOf(req);
+    if (!uid) return res.status(401).json({ error: "Entre na sua conta para pedir recomendações." });
+    const limit = await checkLimit(uid);
+    if (limit === "global") return res.status(429).json({ error: "O serviço atingiu o limite de recomendações de hoje. Volte amanhã." });
+    if (limit === "user") return res.status(429).json({ error: "Você atingiu o limite de recomendações de hoje. Volte amanhã." });
+    res.json(await Promise.all((await ask(text, tags, shelf, exclude)).map(verify)));
   } catch (e) {
     console.error("recommend failed", e.status, e.name, e.message, e.cause?.message);
     res.status(500).json({ error: "Não consegui recomendar agora. Tente de novo." });
+  }
+});
+
+// Exclusão de conta (LGPD): estante, seguidos, perfil, comentários, curtidas e o login
+exports.deleteAccount = onRequest({ cors: true, timeoutSeconds: 120 }, async (req, res) => {
+  const uid = await uidOf(req);
+  if (!uid) return res.status(401).json({ error: "Entre na sua conta para excluí-la." });
+  const db = getFirestore();
+  try {
+    await db.recursiveDelete(db.doc(`users/${uid}`));
+    await db.doc(`profiles/${uid}`).delete();
+    const mine = await db.collectionGroup("comments").where("uid", "==", uid).get();
+    await Promise.all(mine.docs.map((d) => d.ref.delete()));
+    const liked = await db.collectionGroup("comments").where("likes", "array-contains", uid).get();
+    await Promise.all(liked.docs.map((d) => d.ref.update({ likes: FieldValue.arrayRemove(uid) })));
+    await getAuth().deleteUser(uid);
+    res.json({ ok: true });
+  } catch (e) {
+    console.error("deleteAccount failed", uid, e.message);
+    res.status(500).json({ error: "Não foi possível excluir agora. Tente de novo." });
   }
 });
 
@@ -129,7 +161,7 @@ async function nytList(id) {
     if (!r.ok) throw new Error(`${id}: ${r.status}`);
     return (await r.json()).results.books.slice(0, 10).map((b) => ({
       title: toTitle(b.title), author: b.author, cover: b.book_image, link: b.amazon_product_url,
-      weeks: Number(b.weeks_on_list), desc: b.description,
+      weeks: Number(b.weeks_on_list), desc: b.description, isbn: b.primary_isbn13,
     }));
   }
   throw new Error(`${id}: 429`);
@@ -226,18 +258,39 @@ async function addPtTitles(lists) {
   }
 }
 
+// A lista de "Negócios" do NYT vem sem descrição: busca pelo ISBN no Open Library
+async function descByIsbn(isbn) {
+  const get = async (url) => { const r = await fetch(url, { headers: OL_HEADERS }); return r.ok ? r.json() : {}; };
+  const text = (d) => (typeof d === "string" ? d : d?.value || "");
+  try {
+    const e = await get(`https://openlibrary.org/isbn/${isbn}.json`);
+    const d = text(e.description) || (e.works?.[0]?.key ? text((await get(`https://openlibrary.org${e.works[0].key}.json`)).description) : "");
+    return d.split(/\n\n|-{5,}/)[0];
+  } catch {
+    return "";
+  }
+}
+
 // Uma vez por dia: o NYT limita a 5 pedidos por minuto, então espaça as 6 listas; guarda tudo no Firestore
 exports.refreshBestsellers = onSchedule(
   { schedule: "every day 06:00", timeZone: "America/Sao_Paulo", secrets: [nytKey, key], timeoutSeconds: 540 },
   async () => {
     const lists = [];
+    const failed = [];
     for (const [id, name] of Object.entries(NYT_LISTS)) {
-      if (lists.length) await sleep(12500);
-      try { lists.push({ name, books: await nytList(id) }); } catch (e) { console.error("nyt", e.message); }
+      if (lists.length || failed.length) await sleep(12500);
+      try { lists.push({ name, books: await nytList(id) }); } catch (e) { failed.push(id); console.error("nyt", e.message); }
     }
-    const genres = (await Promise.allSettled(GENRES.map(olGenre))).filter((r) => r.status === "fulfilled").map((r) => r.value);
+    const results = await Promise.allSettled(GENRES.map(olGenre));
+    results.filter((r) => r.status === "rejected").forEach((r) => { failed.push("genero"); console.error("genero", r.reason?.message); });
+    const genres = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    for (const b of lists.flatMap((l) => l.books)) {
+      if (!b.desc && b.isbn) b.desc = await descByIsbn(b.isbn);
+      delete b.isbn;
+    }
     await translateSynopses([...lists, ...genres]);
     await addPtTitles([...lists, ...genres]);
-    if (lists.length || genres.length) await getFirestore().doc("public/bestsellers").set({ updatedAt: new Date(), lists, genres });
+    if (lists.length || genres.length) await getFirestore().doc("public/bestsellers").set({ updatedAt: new Date(), lists, genres, failed });
+    if (failed.length) console.error("refreshBestsellers: falhas parciais", failed.join(","));
   }
 );
