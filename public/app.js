@@ -537,7 +537,7 @@ const syncShelfBtn = () => {
   $("login-hint").hidden = !!user;
 };
 
-const SKELETON = `<p class="note">Procurando. Isso leva até 15 segundos.</p>` + `<article class="rec skel"><div class="cover"></div><div><i></i><i></i><i></i></div></article>`.repeat(3);
+const SKELETON = `<p class="note">Procurando. Isso leva até 30 segundos.</p>` + `<article class="rec skel"><div class="cover"></div><div><i></i><i></i><i></i></div></article>`.repeat(3);
 
 async function recommend(useShelf) {
   if (!user) { openAuth(); $("out").innerHTML = `<p class="note">Entre na sua conta para pedir recomendações.</p>`; return; }

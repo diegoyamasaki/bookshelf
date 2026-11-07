@@ -31,7 +31,7 @@ async function ask(text, tags, shelf, exclude) {
       "Use só o título principal, sem tradução ou nome original entre parênteses. " +
       "Em 'why', diga em uma frase como o livro atende ao pedido ou ao gosto do leitor. " +
       "Não use aspas duplas dentro dos textos. " +
-      "Responda SOMENTE com um array JSON de 5 itens: " +
+      "Responda SOMENTE com um array JSON de 10 itens: " +
       '[{"title":"","author":"","why":"uma frase em português"}].',
     messages: [{
       role: "user",
