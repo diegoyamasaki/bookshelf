@@ -1,0 +1,9 @@
+{
+  "hosting": {
+    "public": "public",
+    "headers": [{ "source": "/**", "headers": [{ "key": "Cache-Control", "value": "no-cache" }] }],
+    "rewrites": [{ "source": "/api/recommend", "function": "recommend" }]
+  },
+  "firestore": { "rules": "firestore.rules" },
+  "functions": [{ "source": "functions", "codebase": "default" }]
+}
