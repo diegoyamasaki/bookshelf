@@ -254,7 +254,7 @@ $("auth-form").onsubmit = async (e) => {
 let pUnsub = null;
 let fUnsub = null;
 // Ligue depois de ativar o Google em Authentication > Sign-in method no console do Firebase
-const GOOGLE_LOGIN = false;
+const GOOGLE_LOGIN = true;
 $("google-btn").hidden = !GOOGLE_LOGIN;
 $("google-btn").onclick = async () => {
   try {
