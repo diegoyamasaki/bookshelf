@@ -21,6 +21,9 @@ const safeUrl = (u) => (/^https:\/\//.test(u || "") ? esc(u) : "");
 // Usa o título original, para o mesmo livro ter o mesmo id (e os mesmos comentários) em qualquer idioma.
 const bookId = (b) => ((b.originalTitle || b.title) + " " + b.author).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 120);
 
+// Nos rankings o título vem em inglês com `titlePt` ao lado; na estante e nas recomendações já vem traduzido
+const titleOf = (b) => b.titlePt || b.title;
+
 let user = null;
 let shelf = []; // livros da estante do usuário
 let unsub = null;
@@ -28,19 +31,23 @@ let selected = null;
 let lastRecs = [];
 let cUnsub = null; // listener dos comentários do livro aberto
 let myComment = null;
+let pending = null; // ação de quem clicou antes de entrar, executada depois do login
 
 // --- abas
 const TABS = ["recomendar", "estante", "top", "leitores"];
-function showTab(name) {
+function showTab(name, keep) {
   for (const s of TABS) $(s).hidden = s !== name;
   document.querySelectorAll("nav button").forEach((b) =>
     b.dataset.tab === name ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
-  history.replaceState(null, "", "#" + name);
+  // uma entrada de histórico por aba: o botão voltar do navegador volta à aba anterior
+  if (location.hash !== "#" + name) history[keep ? "replaceState" : "pushState"](null, "", "#" + name);
   if (name === "top") loadTop();
   if (name === "estante") renderShelf();
   if (name === "leitores") { readersCache = null; renderReaders(); }
 }
 document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+const tabFromHash = () => (TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "recomendar");
+addEventListener("popstate", () => showTab(tabFromHash(), true));
 
 // --- login
 let signingUp = false;
@@ -55,9 +62,16 @@ function authMode(up) {
   $("auth-err").classList.remove("ok");
 }
 function openAuth() { authMode(false); $("auth-dlg").showModal(); $("email").focus(); }
-$("auth-btn").onclick = () => (user ? signOut(auth) : openAuth());
+// Guarda a ação de quem ainda não entrou (pedir recomendação, adicionar livro) e a repete depois do login
+function requireLogin(fn) {
+  if (user) return true;
+  pending = fn;
+  openAuth();
+  return false;
+}
+$("auth-btn").onclick = () => { if (user) return signOut(auth); pending = null; openAuth(); };
 $("auth-switch").onclick = () => authMode(!signingUp);
-$("auth-close").onclick = () => $("auth-dlg").close();
+$("auth-close").onclick = () => { pending = null; $("auth-dlg").close(); };
 $("auth-reset").onclick = async () => {
   const err = $("auth-err");
   err.classList.remove("ok");
@@ -89,7 +103,7 @@ let pUnsub = null;
 let fUnsub = null;
 // Ligue depois de ativar o Google em Authentication > Sign-in method no console do Firebase
 const GOOGLE_LOGIN = true;
-$("google-btn").hidden = !GOOGLE_LOGIN;
+$("google-btn").hidden = $("auth-or").hidden = !GOOGLE_LOGIN;
 $("google-btn").onclick = async () => {
   try {
     await signInWithPopup(auth, new GoogleAuthProvider());
@@ -102,6 +116,7 @@ $("google-btn").onclick = async () => {
 onAuthStateChanged(auth, (u) => {
   user = u;
   $("auth-btn").textContent = u ? "Sair" : "Entrar";
+  $("profile-btn").hidden = !u;
   [unsub, pUnsub, fUnsub, rUnsub].forEach((f) => f?.());
   shelf = [];
   selected = null;
@@ -117,7 +132,10 @@ onAuthStateChanged(auth, (u) => {
       renderRecs();
       renderTop();
     });
-    pUnsub = onSnapshot(doc(db, "profiles", u.uid), (d) => { myProfile = d.data() ?? null; });
+    pUnsub = onSnapshot(doc(db, "profiles", u.uid), (d) => {
+      myProfile = d.data() ?? null;
+      if (!$("leitores").hidden && !readerView) renderReaders();
+    });
     fUnsub = onSnapshot(collection(db, "users", u.uid, "following"), (snap) => {
       following = new Set(snap.docs.map((d) => d.id));
       if ($("leitores").hidden) return;
@@ -128,7 +146,9 @@ onAuthStateChanged(auth, (u) => {
   renderShelf();
   renderRecs();
   renderTop();
+  renderPreview();
   renderReaders();
+  if (u && pending) { const p = pending; pending = null; p(); }
 });
 
 // --- estante
@@ -136,8 +156,9 @@ const COLORS = ["#8c3b3b", "#2f5d62", "#6b5b95", "#a87631", "#3d6b4f", "#a24f78"
 const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
 // Sem capa no Open Library (web novels, edições raras): capa gerada com o título, na cor da lombada
 const coverHtml = (b) => safeUrl(b.cover)
-  ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(b.title)}">`
-  : `<div class="cover ph" style="background:${COLORS[hash(bookId(b)) % COLORS.length]}"><span>${esc(b.title)}</span></div>`;
+  ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(titleOf(b))}" loading="lazy">`
+  : `<div class="cover ph" style="background:${COLORS[hash(bookId(b)) % COLORS.length]}" role="img"
+       aria-label="Sem capa: ${esc(titleOf(b))}, de ${esc(b.author)}"><b>${esc(titleOf(b))}</b><span>${esc(b.author)}</span></div>`;
 
 const STATUS = { lido: "Lido", lendo: "Lendo", quero: "Quero ler" };
 const statusOf = (b) => b.status || "lido"; // livros antigos não têm status
@@ -163,7 +184,8 @@ function detailHtml(b, mine) {
   const status = statusOf(b);
   const controls = mine
     ? `<div class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${status === k}">${v}</button>`).join("")}</div>
-       <div class="stars" role="group" aria-label="Sua nota">${stars(b.rating || 0, true)}</div>`
+       <div class="stars" role="group" aria-label="Sua nota">${stars(b.rating || 0, true)}</div>
+       ${b.rating ? `<p class="hint">Toque na mesma estrela para limpar a nota.</p>` : ""}`
     : `<div class="note" style="margin:8px 0 0">${STATUS[status]}</div><div class="stars" role="img" aria-label="Nota ${b.rating || 0} de 5">${stars(b.rating || 0, false)}</div>`;
   return `${coverHtml(b)}
     <div><h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
@@ -290,32 +312,40 @@ function renderReaders() {
     return;
   }
   if (readerView) return renderReader(area);
-  area.innerHTML = `<form class="profile-box" id="profile-form">
-      <h3>Meu perfil</h3>
-      <label>Nome<input type="text" id="p-name" maxlength="40" value="${esc(myProfile?.name ?? user.displayName ?? "")}"></label>
-      <label><input type="checkbox" id="p-public" ${myProfile?.shelfPublic ? "checked" : ""}> Deixar minha estante pública: outros leitores poderão vê-la e me seguir</label>
-      <div class="row"><button class="btn main" type="submit">Salvar perfil</button><span class="note" id="p-msg" role="status" style="margin:0"></span></div>
-    </form>
+  area.innerHTML = `${myProfile?.shelfPublic ? "" : `<p class="note tight">Sua estante está privada: você vê os outros, mas ninguém vê a sua. Abra <b>Meu perfil</b> para mudar isso.</p>`}
     <div class="filters">${["todos", "seguindo"].map((k) =>
       `<button class="chip" data-rt="${k}" aria-pressed="${readersTab === k}">${k === "todos" ? "Todos" : "Seguindo"}</button>`).join("")}</div>
     <div id="readers-list"><p class="note">Carregando.</p></div>`;
   area.querySelectorAll("[data-rt]").forEach((c) => (c.onclick = () => { readersTab = c.dataset.rt; renderReaders(); }));
-  $("profile-form").onsubmit = async (e) => {
-    e.preventDefault();
-    const name = $("p-name").value.trim();
-    const pub = $("p-public").checked;
-    const msg = $("p-msg");
-    if (pub && !name) { msg.textContent = "Escreva um nome para tornar sua estante pública."; return; }
-    try {
-      await setDoc(doc(db, "profiles", user.uid), { name, shelfPublic: pub });
-      if (name && name !== user.displayName) await updateProfile(user, { displayName: name });
-      msg.textContent = "Perfil salvo.";
-    } catch {
-      msg.textContent = "Não foi possível salvar. Tente de novo.";
-    }
-  };
   loadReadersList();
 }
+
+// --- perfil: nome público e estante pública, no botão Meu perfil do cabeçalho
+$("profile-btn").onclick = () => {
+  $("p-name").value = myProfile?.name ?? user?.displayName ?? "";
+  $("p-public").checked = !!myProfile?.shelfPublic;
+  $("p-msg").textContent = "";
+  $("p-msg").classList.remove("ok");
+  $("profile-dlg").showModal();
+};
+$("profile-close").onclick = () => $("profile-dlg").close();
+$("profile-form").onsubmit = async (e) => {
+  e.preventDefault();
+  const name = $("p-name").value.trim();
+  const pub = $("p-public").checked;
+  const msg = $("p-msg");
+  msg.classList.remove("ok");
+  if (pub && !name) { msg.textContent = "Escreva um nome para tornar sua estante pública."; return; }
+  try {
+    await setDoc(doc(db, "profiles", user.uid), { name, shelfPublic: pub });
+    if (name && name !== user.displayName) await updateProfile(user, { displayName: name });
+    msg.classList.add("ok");
+    msg.textContent = "Perfil salvo.";
+    setTimeout(() => $("profile-dlg").close(), 1200);
+  } catch {
+    msg.textContent = "Não foi possível salvar. Tente de novo.";
+  }
+};
 
 async function loadReadersList() {
   const box = $("readers-list");
@@ -419,36 +449,74 @@ async function loadTop() {
   }
   topLoading = false;
   renderTop();
+  renderPreview();
 }
 
 // Busca pelo título em português (quando conhecido) e autor: o link direto do NYT leva à Amazon dos EUA
 function buyLinks(b) {
-  const q = encodeURIComponent(`${b.titlePt || b.title} ${b.author}`);
+  const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
   return `<a href="https://www.amazon.com.br/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon Brasil</a>
     <a href="https://www.google.com/search?tbm=shop&q=${q}" target="_blank" rel="noopener">Google Shopping</a>`;
 }
 
+// Uma linha do ranking. `have` nulo = prévia de quem não entrou: sem botões de estante.
+const topRow = (b, i, attr, li, have) => `<li>
+  <span class="rank">${i + 1}</span>
+  ${coverHtml(b)}
+  <div>
+    <h3>${esc(titleOf(b))}</h3>
+    ${b.titlePt ? `<span class="orig">Título original: ${esc(b.title)}</span>` : ""}
+    <span class="by">${esc(b.author)}${b.weeks > 1 ? `, ${b.weeks} semanas na lista` : ""}</span>
+    ${b.synopsis ? `<p class="syn">${esc(b.synopsis)}</p>` : ""}
+    ${have ? `<div class="acts">${have.has(bookId(b))
+      ? `<button class="btn" disabled>Na estante</button><button class="link" data-goshelf>Ver na estante</button>`
+      : `<button class="btn" data-${attr}="${li}" data-i="${i}">Adicionar à estante</button>
+         <button class="link" data-${attr}="${li}" data-i="${i}" data-read="1">Já li este</button>`}</div>` : ""}
+    <p class="buy">Comprar: ${buyLinks(b)}</p>
+  </div></li>`;
+
+let nytTab = 0;
+let genreTab = 0;
+
 function renderTop() {
   if (!topData) return;
   const have = new Set(shelf.map((b) => b.id));
-  const list = (lists, attr, empty) => lists.length
-    ? lists.map((l, li) => `<div><h3>${esc(l.name)}</h3><ol>${l.books.map((b, i) => `<li><strong>${esc(b.titlePt || b.title)}</strong>${b.titlePt ? `<span class="by">Título original: ${esc(b.title)}</span>` : ""}
-        <span class="by">${esc(b.author)}${b.weeks > 1 ? `, ${b.weeks} semanas na lista` : ""}</span>
-        ${b.synopsis ? `<p class="syn">${esc(b.synopsis)}</p>` : ""}
-        <span class="acts"><button class="link" data-${attr}="${li}" data-i="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
-        ${buyLinks(b)}</span></li>`).join("")}</ol></div>`).join("")
-    : `<p class="note">${empty}</p>`;
-  $("nyt-area").innerHTML = list(nytData, "n", "Não foi possível carregar os best-sellers. Recarregue a página.");
-  $("top-area").innerHTML = list(topData, "g", "Não foi possível carregar os rankings. Recarregue a página.");
+  // uma lista por vez: 11 listas de 10 livros com sinopse não cabem numa página
+  const section = (lists, tabs, area, tab, attr, empty) => {
+    if (!lists.length) { $(tabs).innerHTML = ""; $(area).innerHTML = `<p class="note">${empty}</p>`; return; }
+    const li = Math.min(tab, lists.length - 1);
+    $(tabs).innerHTML = lists.map((l, i) =>
+      `<button class="chip" data-t="${i}" aria-pressed="${i === li}">${esc(l.name)}</button>`).join("");
+    $(area).innerHTML = `<ol class="top-list">${lists[li].books.map((b, i) => topRow(b, i, attr, li, have)).join("")}</ol>`;
+  };
+  section(nytData, "nyt-tabs", "nyt-area", nytTab, "n", "Não foi possível carregar os best-sellers. Recarregue a página.");
+  section(topData, "top-tabs", "top-area", genreTab, "g", "Não foi possível carregar os rankings. Recarregue a página.");
 }
-$("nyt-area").onclick = (e) => {
-  const b = e.target.closest("[data-n]");
-  if (b) addBook(nytData[b.dataset.n].books[b.dataset.i]);
+
+const topClick = (e, data, attr) => {
+  if (e.target.closest("[data-goshelf]")) return showTab("estante");
+  const b = e.target.closest(`[data-${attr}]`);
+  if (b) addBook(data[b.dataset[attr]].books[b.dataset.i], b.dataset.read ? "lido" : "quero");
 };
-$("top-area").onclick = (e) => {
-  const b = e.target.closest("[data-g]");
-  if (b) addBook(topData[b.dataset.g].books[b.dataset.i]);
-};
+$("nyt-area").onclick = (e) => topClick(e, nytData, "n");
+$("top-area").onclick = (e) => topClick(e, topData, "g");
+$("nyt-tabs").onclick = (e) => { const c = e.target.closest("[data-t]"); if (c) { nytTab = Number(c.dataset.t); renderTop(); } };
+$("top-tabs").onclick = (e) => { const c = e.target.closest("[data-t]"); if (c) { genreTab = Number(c.dataset.t); renderTop(); } };
+
+// Quem chega sem conta vê livros de verdade na primeira tela, não só o formulário
+function renderPreview() {
+  const box = $("preview");
+  if (user) { box.hidden = true; box.innerHTML = ""; return; }
+  if (!topData) return loadTop();
+  const l = nytData?.[0] || topData[0];
+  if (!l) { box.hidden = true; return; }
+  box.hidden = false;
+  box.innerHTML = `<h2>Enquanto isso, os mais lidos da semana</h2>
+    <p class="note tight">${esc(l.name)}, pela lista do New York Times.</p>
+    <ol class="top-list">${l.books.slice(0, 3).map((b, i) => topRow(b, i, null, 0, null)).join("")}</ol>
+    <button class="btn" id="preview-all">Ver todos os mais lidos</button>`;
+  $("preview-all").onclick = () => showTab("top");
+}
 
 // --- privacidade e exclusão de conta
 $("privacy-btn").onclick = () => {
@@ -493,7 +561,7 @@ function watchRec(id) {
 }
 
 function toggleRecComments(b) {
-  if (!user) return openAuth();
+  if (!requireLogin(() => toggleRecComments(b))) return;
   const id = bookId(b);
   if (openRecs.delete(id)) { renderRecs(); return; }
   openRecs.add(id);
@@ -501,6 +569,7 @@ function toggleRecComments(b) {
 }
 
 $("out").onclick = (e) => {
+  if (e.target.closest("[data-goshelf]")) return showTab("estante");
   const btn = e.target.closest(".like");
   if (btn && user) updateDoc(doc(db, "books", btn.closest("[data-rc]").dataset.rc, "comments", btn.dataset.uid),
     { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
@@ -518,24 +587,43 @@ function renderRecs() {
         <h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
         <p>${esc(b.why)}</p>
         <div class="actions">
-          <button class="btn" data-add="${i}" ${have.has(bookId(b)) ? "disabled" : ""}>${have.has(bookId(b)) ? "Na estante" : "Adicionar à estante"}</button>
+          ${have.has(bookId(b))
+            ? `<button class="btn" disabled>Na estante</button><button class="link" data-goshelf>Ver na estante</button>`
+            : `<button class="btn" data-add="${i}">Adicionar à estante</button>`}
           ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library (web novels e edições raras costumam ficar de fora).</span>`}
-          ${buyLinks(b)}
-          <button class="link" data-cm="${i}">${openRecs.has(bookId(b)) ? "Ocultar comentários" : "Ver comentários"}</button>
+          <button class="link" data-cm="${i}" hidden>Ver comentários</button>
         </div>
+        <p class="buy">Comprar: ${buyLinks(b)}</p>
         <div class="rc" data-rc="${bookId(b)}" hidden></div>
       </div>
     </article>`).join("");
   $("out").querySelectorAll("[data-add]").forEach((btn) => (btn.onclick = () => addBook(lastRecs[btn.dataset.add])));
   $("out").querySelectorAll("[data-cm]").forEach((btn) => (btn.onclick = () => toggleRecComments(lastRecs[btn.dataset.cm])));
-  if (user) openRecs.forEach((id) => watchRec(id)); else openRecs.clear();
+  if (user) { openRecs.forEach((id) => watchRec(id)); showCommentCounts(); } else openRecs.clear();
 }
 
-async function addBook(b) {
-  if (!user) return openAuth();
+// O botão de comentários só aparece nos livros que já têm algum: na recomendação ninguém pode
+// comentar (a regra exige o livro na estante), então "Ver comentários (0)" seria um botão morto.
+const recCounts = {};
+function showCommentCounts() {
+  lastRecs.forEach(async (b, i) => {
+    const id = bookId(b);
+    try {
+      recCounts[id] ??= (await getCountFromServer(collection(db, "books", id, "comments"))).data().count;
+      const btn = $("out").querySelector(`[data-cm="${i}"]`);
+      if (!btn || !recCounts[id]) return;
+      btn.hidden = false;
+      btn.textContent = openRecs.has(id) ? "Ocultar comentários" : `Ver comentários (${recCounts[id]})`;
+    } catch {}
+  });
+}
+
+async function addBook(b, status = "quero") {
+  if (!requireLogin(() => addBook(b, status))) return;
   await setDoc(doc(db, "users", user.uid, "books", bookId(b)), {
-    title: b.title, originalTitle: b.originalTitle || "", author: b.author, cover: b.cover || "", link: b.link || "",
-    status: "quero", rating: 0, addedAt: serverTimestamp(), // vem de recomendação ou ranking: ainda não foi lido
+    title: titleOf(b), originalTitle: b.originalTitle || (b.titlePt ? b.title : ""),
+    author: b.author, cover: b.cover || "", link: b.link || "",
+    status, rating: 0, addedAt: serverTimestamp(),
   });
 }
 
@@ -544,14 +632,18 @@ const syncShelfBtn = () => {
   $("login-hint").hidden = !!user;
 };
 
-const SKELETON = `<p class="note">Procurando. Isso leva até 30 segundos.</p>` + `<article class="rec skel"><div class="cover"></div><div><i></i><i></i><i></i></div></article>`.repeat(3);
+const cut = (s) => (s.length > 80 ? s.slice(0, 80) + "…" : s);
+const SKELETON = (what) => `<p class="note">Procurando ${esc(what)}. Isso leva até 30 segundos.</p>`
+  + `<article class="rec skel"><div class="cover"></div><div><i></i><i></i><i></i></div></article>`.repeat(3);
 
 async function recommend(useShelf) {
-  if (!user) { openAuth(); $("out").innerHTML = `<p class="note">Entre na sua conta para pedir recomendações.</p>`; return; }
+  if (!requireLogin(() => recommend(useShelf))) { $("out").innerHTML = `<p class="note">Entre na sua conta para pedir recomendações.</p>`; return; }
   const tags = [...document.querySelectorAll("#tags input:checked")].map((i) => i.value);
   if (!useShelf && !$("text").value.trim() && !tags.length) { $("out").innerHTML = `<p class="note">Escreva o que procura ou escolha uma característica.</p>`; return; }
   $("go").disabled = $("go-shelf").disabled = true;
-  $("out").innerHTML = SKELETON;
+  $("out").innerHTML = SKELETON(useShelf
+    ? "livros parecidos com os da sua estante"
+    : cut([$("text").value.trim(), ...tags].filter(Boolean).join(", ")));
   try {
     const body = { text: $("text").value, tags, idToken: await user.getIdToken(), exclude: shelf.map((b) => b.title) };
     if (useShelf) body.shelf = shelf.slice(-40).map(({ title, author, status, rating }) => ({ title, author, status: status || "lido", rating: rating || 0 }));
@@ -569,4 +661,4 @@ async function recommend(useShelf) {
 $("go").onclick = () => recommend(false);
 $("go-shelf").onclick = () => recommend(true);
 
-showTab(TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "recomendar");
+showTab(tabFromHash(), true);
