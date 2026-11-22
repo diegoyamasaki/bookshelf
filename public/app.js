@@ -212,10 +212,14 @@ const rankCover = (b) => safeUrl(b.cover)
   ? `<img class="rank-cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(titleOf(b))}" loading="lazy">`
   : `<span class="rank-cover ph" style="background:${colorOf(b)}" role="img" aria-label="Sem capa de ${esc(titleOf(b))}"></span>`;
 
+// Programa de Associados da Amazon Brasil: a tag identifica as compras que saíram daqui.
+// O rodapé traz a divulgação que o contrato exige; trocar a tag aqui basta.
+const AMZ_TAG = "estante0a3-20";
+
 // Links de compra: busca pelo título em português quando conhecido
 function storeLinks(b, cls = "") {
   const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
-  return `<a class="${cls}" href="https://www.amazon.com.br/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon →</a>
+  return `<a class="${cls}" href="https://www.amazon.com.br/s?k=${q}&i=stripbooks&tag=${AMZ_TAG}" target="_blank" rel="noopener sponsored">Amazon →</a>
     <a class="${cls}" href="https://www.estantevirtual.com.br/busca?q=${q}" target="_blank" rel="noopener">Estante Virtual →</a>`;
 }
 
