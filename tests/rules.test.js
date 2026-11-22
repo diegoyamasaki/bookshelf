@@ -2,7 +2,7 @@
 const { test, before, after } = require("node:test");
 const { readFileSync } = require("node:fs");
 const { initializeTestEnvironment, assertSucceeds, assertFails } = require("@firebase/rules-unit-testing");
-const { doc, getDoc, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove, serverTimestamp } = require("firebase/firestore");
+const { doc, getDoc, setDoc, updateDoc, deleteDoc, arrayUnion, arrayRemove, serverTimestamp, increment } = require("firebase/firestore");
 
 let env;
 before(async () => {
@@ -64,4 +64,20 @@ test("uso diário e seguidos: fechados para o cliente", async () => {
   await assertFails(setDoc(doc(as("ana"), "usage/ana_2026-01-01"), { n: 0 }));
   await assertSucceeds(setDoc(doc(as("ana"), "users/ana/following/bia"), { at: serverTimestamp() }));
   await assertFails(getDoc(doc(as("bia"), "users/ana/following/bia")));
+});
+
+test("cliques: qualquer visitante soma 1 por vez, e só isso", async () => {
+  const anon = env.unauthenticatedContext().firestore();
+  const ref = (db) => doc(db, "stats/2026-01-02");
+  await assertSucceeds(setDoc(ref(anon), { amazon: increment(1) }, { merge: true })); // cria com 1
+  await assertSucceeds(setDoc(ref(anon), { amazon: increment(1) }, { merge: true })); // soma mais 1
+  await assertSucceeds(setDoc(ref(as("ana")), { estante: increment(1) }, { merge: true }));
+  await assertFails(setDoc(ref(anon), { amazon: increment(50) }, { merge: true })); // pular o contador
+  await assertFails(setDoc(ref(anon), { amazon: increment(-1) }, { merge: true }));
+  await assertFails(setDoc(ref(anon), { amazon: increment(1), estante: increment(1) }, { merge: true })); // dois de uma vez
+  await assertFails(setDoc(ref(anon), { outro: increment(1) }, { merge: true })); // contador desconhecido
+  await assertFails(setDoc(ref(anon), { amazon: 999 })); // sobrescrever
+  await assertFails(deleteDoc(ref(anon)));
+  await assertFails(getDoc(ref(anon))); // os números ficam para o console
+  await assertFails(setDoc(doc(anon, "stats/qualquer-coisa"), { amazon: increment(1) }, { merge: true }));
 });

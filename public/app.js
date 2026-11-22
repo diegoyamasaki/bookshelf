@@ -1,7 +1,7 @@
 import { initializeApp } from "https://www.gstatic.com/firebasejs/11.0.2/firebase-app.js";
 import { getAuth, onAuthStateChanged, signInWithEmailAndPassword, createUserWithEmailAndPassword, signOut, updateProfile, GoogleAuthProvider, signInWithPopup, sendPasswordResetEmail }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-auth.js";
-import { getFirestore, collection, doc, getDoc, getDocs, getCountFromServer, query, where, orderBy, limit, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove }
+import { getFirestore, collection, doc, getDoc, getDocs, getCountFromServer, query, where, orderBy, limit, setDoc, updateDoc, deleteDoc, onSnapshot, serverTimestamp, arrayUnion, arrayRemove, increment }
   from "https://www.gstatic.com/firebasejs/11.0.2/firebase-firestore.js";
 
 // Chave web do Firebase: pública por design; o acesso é protegido por firestore.rules
@@ -216,12 +216,26 @@ const rankCover = (b) => safeUrl(b.cover)
 // O rodapé traz a divulgação que o contrato exige; trocar a tag aqui basta.
 const AMZ_TAG = "estante0a3-20";
 
-// Links de compra: busca pelo título em português quando conhecido
+// Links de compra. Sem edição brasileira conhecida, o ISBN cai no livro certo; com ela,
+// o título em português acha melhor do que o ISBN da edição americana.
 function storeLinks(b, cls = "") {
   const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
-  return `<a class="${cls}" href="https://www.amazon.com.br/s?k=${q}&i=stripbooks&tag=${AMZ_TAG}" target="_blank" rel="noopener sponsored">Amazon →</a>
+  const amz = b.isbn && !b.titlePt ? encodeURIComponent(b.isbn) : q;
+  return `<a class="${cls}" href="https://www.amazon.com.br/s?k=${amz}&i=stripbooks&tag=${AMZ_TAG}" target="_blank" rel="noopener sponsored">Amazon →</a>
     <a class="${cls}" href="https://www.estantevirtual.com.br/busca?q=${q}" target="_blank" rel="noopener">Estante Virtual →</a>`;
 }
+
+// Quantos cliques os links de loja recebem por dia. Só o número: nada de quem clicou,
+// nem qual livro. A regra do Firestore só aceita somar 1 a um desses dois contadores.
+const STORES = { "amazon.com.br": "amazon", "estantevirtual.com.br": "estante" };
+addEventListener("click", (e) => {
+  const a = e.target.closest("a[href]");
+  if (!a) return;
+  const store = Object.entries(STORES).find(([host]) => a.href.includes(host))?.[1];
+  if (!store) return;
+  const day = new Date().toLocaleDateString("sv-SE"); // AAAA-MM-DD no fuso de quem clica
+  setDoc(doc(db, "stats", day), { [store]: increment(1) }, { merge: true }).catch(() => {});
+});
 
 // ======================= Recomendar =======================
 const CHARS = [

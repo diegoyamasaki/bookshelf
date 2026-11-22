@@ -39,6 +39,22 @@ service cloud.firestore {
       allow read: if true;
     }
 
+    // Cliques nos links de loja: um contador por dia, nada sobre quem clicou.
+    // Cada escrita só pode somar 1 a um contador conhecido; os números ficam para o console.
+    match /stats/{day} {
+      function dayOk() { return day.matches('^\\d{4}-\\d{2}-\\d{2}$'); }
+      function first(k) {
+        return request.resource.data.keys().hasOnly([k]) && request.resource.data.get(k, -1) == 1;
+      }
+      function more(k) {
+        return request.resource.data.diff(resource.data).affectedKeys().hasOnly([k])
+          && request.resource.data.get(k, -1) == resource.data.get(k, 0) + 1;
+      }
+      allow read, delete: if false;
+      allow create: if dayOk() && (first('amazon') || first('estante'));
+      allow update: if dayOk() && (more('amazon') || more('estante'));
+    }
+
     // Comentários públicos: um por pessoa por livro (id do doc = uid)
     match /books/{bookId}/comments/{uid} {
       function validText() {
