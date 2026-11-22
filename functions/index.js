@@ -180,11 +180,22 @@ const GENRES = [
 
 const OL_HEADERS = { "User-Agent": "Estante-bookshelf-app" };
 
-// Open Library ordenado por quantas pessoas guardaram o livro (readinglog)
+// Open Library ordenado por quantas pessoas guardaram o livro (readinglog).
+// O servidor deles cai e demora: sem nova tentativa, uma falha de rede derruba o gênero inteiro
+// (em 22/11/2026 os cinco falharam de uma vez com "fetch failed").
 async function olGenre(g) {
   const qs = new URLSearchParams({ q: g.q, sort: "readinglog", language: "eng", limit: 40, fields: "key,title,author_name,cover_i" });
-  const r = await fetch(`https://openlibrary.org/search.json?${qs}`, { headers: OL_HEADERS });
-  if (!r.ok) throw new Error(`ol ${g.name}: ${r.status}`);
+  let r;
+  for (let tries = 0; ; tries++) {
+    try {
+      r = await fetch(`https://openlibrary.org/search.json?${qs}`, { headers: OL_HEADERS });
+      if (!r.ok) throw new Error(`ol ${g.name}: ${r.status}`);
+      break;
+    } catch (e) {
+      if (tries === 2) throw e;
+      await sleep(5000 * (tries + 1));
+    }
+  }
   const perAuthor = {};
   const books = (await r.json()).docs.map((d) => ({
     key: d.key, title: d.title, author: d.author_name?.[0] || "Autor desconhecido",
@@ -284,16 +295,28 @@ exports.refreshBestsellers = onSchedule(
       if (lists.length || failed.length) await sleep(12500);
       try { lists.push({ name, books: await nytList(id) }); } catch (e) { failed.push(id); console.error("nyt", e.message); }
     }
-    const results = await Promise.allSettled(GENRES.map(olGenre));
-    results.filter((r) => r.status === "rejected").forEach((r) => { failed.push("genero"); console.error("genero", r.reason?.message); });
-    const genres = results.filter((r) => r.status === "fulfilled").map((r) => r.value);
+    // Um gênero por vez: em paralelo, o Open Library derruba quase todas as conexões de uma vez
+    // (22/11/2026: 4 de 5 morreram no mesmo milissegundo, e a que sobrou funcionou).
+    const genres = [];
+    for (const g of GENRES) {
+      try { genres.push(await olGenre(g)); } catch (e) { failed.push(`genero ${g.name}`); console.error("genero", g.name, e.message); }
+    }
     for (const b of lists.flatMap((l) => l.books)) {
       if (!b.desc && b.isbn) b.desc = await descByIsbn(b.isbn);
-      delete b.isbn;
+      // o ISBN fica guardado: o site monta com ele o link de compra do livro certo
     }
     await translateSynopses([...lists, ...genres]);
     await addPtTitles([...lists, ...genres]);
-    if (lists.length || genres.length) await getFirestore().doc("public/bestsellers").set({ updatedAt: new Date(), lists, genres, failed });
+    // Uma lista fora do ar não pode apagar a que já estava publicada: mantém a anterior, por nome
+    const keep = (fresh, old = []) => {
+      const byName = new Map(old.map((l) => [l.name, l]));
+      for (const l of fresh) byName.set(l.name, l);
+      return [...byName.values()];
+    };
+    const ref = getFirestore().doc("public/bestsellers");
+    const prev = (await ref.get()).data() ?? {};
+    const out = { updatedAt: new Date(), lists: keep(lists, prev.lists), genres: keep(genres, prev.genres), failed };
+    if (out.lists.length || out.genres.length) await ref.set(out);
     if (failed.length) console.error("refreshBestsellers: falhas parciais", failed.join(","));
   }
 );
