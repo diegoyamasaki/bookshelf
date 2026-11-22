@@ -191,12 +191,14 @@ h2{font:400 40px/1 var(--display);letter-spacing:-.02em;margin:0}
 /* ---------- Mais lidos ---------- */
 .rank-list{list-style:none;margin:0;padding:0;border-top:2px solid var(--ink);
   display:grid;grid-template-columns:repeat(auto-fit,minmax(min(100%,460px),1fr));column-gap:56px}
-.rank-item{display:grid;grid-template-columns:64px minmax(0,1fr) auto;gap:4px 16px;align-items:start;
-  padding:18px 0;border-bottom:1px solid var(--ink)}
+.rank-item{display:grid;grid-template-columns:56px 58px minmax(0,1fr) auto;gap:4px 16px;align-items:start;
+  padding:18px 0;border-bottom:1px solid var(--ink);min-width:0}
+.rank-item>div{min-width:0}
 .rank-n{grid-row:span 2;font:400 44px/1 var(--display);color:var(--red)}
+.rank-cover{grid-row:span 2;display:block;width:58px;height:87px;object-fit:cover;box-shadow:3px 3px 0 var(--ink)}
 .rank-title{font:400 22px/1.15 var(--display);margin:0}
 .rank-meta{font:400 11px/1.5 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
-.rank-buy{grid-column:2;display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
+.rank-buy{grid-column:3;display:flex;flex-wrap:wrap;gap:14px;margin-top:2px}
 .rank-buy a{font:italic 400 15px/1.3 var(--body);color:var(--muted);text-decoration:underline;text-underline-offset:3px}
 .rank-buy a:hover{color:var(--red)}
 .src-note{margin:18px 0 0;font:400 11px/1.6 var(--mono);text-transform:uppercase;letter-spacing:.06em;color:var(--muted)}
@@ -269,8 +271,10 @@ dialog::backdrop{background:rgba(20,26,46,.55)}
   .detail{gap:28px}
   .d-rank{font-size:64px}
   .d-title{font-size:32px}
-  .rank-item{grid-template-columns:44px minmax(0,1fr)}
-  .rank-item .btn-mini{grid-column:2;justify-self:start;margin-top:6px}
+  .rank-item{grid-template-columns:40px 48px minmax(0,1fr)}
+  .rank-cover{width:48px;height:72px;box-shadow:2px 2px 0 var(--ink)}
+  .rank-item .btn-mini{grid-column:3;justify-self:start;margin-top:6px}
+  .rank-buy{grid-column:3}
   .rank-n{font-size:32px}
 }
 @media (prefers-reduced-motion:reduce){.spine{transition:none}}

@@ -207,6 +207,11 @@ function spineHtml(b, i, o = {}) {
     ${o.n ? `<span class="n">${o.n}</span>` : ""}<span class="t">${esc(titleOf(b))}</span>${mark}</button>`;
 }
 
+// Capa pequena do ranking: sem imagem, vira um bloco na cor da lombada
+const rankCover = (b) => safeUrl(b.cover)
+  ? `<img class="rank-cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(titleOf(b))}" loading="lazy">`
+  : `<span class="rank-cover ph" style="background:${colorOf(b)}" role="img" aria-label="Sem capa de ${esc(titleOf(b))}"></span>`;
+
 // Links de compra: busca pelo título em português quando conhecido
 function storeLinks(b, cls = "") {
   const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
@@ -600,6 +605,7 @@ function renderTop() {
     const saved = have.has(bookId(b));
     return `<li class="rank-item">
       <span class="rank-n">${i + 1}</span>
+      ${rankCover(b)}
       <div>
         <h3 class="rank-title">${esc(titleOf(b))}</h3>
         <p class="rank-meta">${esc(b.author)}${b.weeks > 1 ? ` · ${b.weeks} semanas na lista` : ""}${b.titlePt ? ` · ${esc(b.title)}` : ""}</p>
