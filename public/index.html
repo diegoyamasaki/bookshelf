@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1">
 <title>Estante</title>
 <meta name="description" content="Peça recomendações de livros e web novels a uma IA e monte sua estante com status, notas e comentários.">
-<meta name="theme-color" content="#141a2e">
+<meta name="theme-color" content="#efe8da">
 <meta property="og:type" content="website">
 <meta property="og:title" content="Estante">
 <meta property="og:description" content="Recomendações de livros com IA e uma estante pessoal com status, notas e comentários.">
@@ -13,123 +13,154 @@
 <meta property="og:image" content="https://bookshelf-diego-2611.web.app/og.png">
 <meta property="og:image:width" content="1200">
 <meta property="og:image:height" content="630">
-<meta property="og:image:alt" content="Estante: lombadas de livros coloridas sobre uma prateleira de madeira.">
+<meta property="og:image:alt" content="Estante: lombadas de livros sobre uma prateleira de madeira.">
 <meta name="twitter:card" content="summary_large_image">
-<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' rx='18' fill='%23141a2e'/%3E%3Crect x='18' y='22' width='16' height='56' rx='2' fill='%238c3b3b'/%3E%3Crect x='38' y='14' width='16' height='64' rx='2' fill='%23f2b84b'/%3E%3Crect x='58' y='26' width='16' height='52' rx='2' fill='%232f5d62'/%3E%3Crect x='12' y='78' width='76' height='6' rx='2' fill='%237a5638'/%3E%3C/svg%3E">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'%3E%3Crect width='100' height='100' fill='%23efe8da'/%3E%3Crect x='17' y='24' width='15' height='54' fill='%237a2e2a'/%3E%3Crect x='36' y='16' width='15' height='62' fill='%23141a2e'/%3E%3Crect x='55' y='28' width='15' height='50' fill='%23b23a26'/%3E%3Crect x='74' y='34' width='11' height='44' fill='%232d5b63'/%3E%3Crect x='12' y='78' width='78' height='8' fill='%233b2a1e'/%3E%3C/svg%3E">
 <link rel="preconnect" href="https://fonts.googleapis.com">
 <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-<link href="https://fonts.googleapis.com/css2?family=Bricolage+Grotesque:opsz,wght@12..96,500;12..96,700&family=Literata:ital,opsz,wght@0,7..72,400;1,7..72,400&display=swap" rel="stylesheet">
+<link href="https://fonts.googleapis.com/css2?family=Gloock&family=Newsreader:ital,opsz,wght@0,6..72,400;1,6..72,400&family=Spline+Sans+Mono:wght@400;500&display=swap" rel="stylesheet">
 <link rel="stylesheet" href="style.css">
 </head>
 <body>
-<header>
-  <div class="logo">Estante</div>
-  <nav aria-label="Seções">
-    <button data-tab="recomendar" aria-current="page">Recomendar</button>
-    <button data-tab="estante">Minha estante</button>
-    <button data-tab="top">Mais lidos</button>
-    <button data-tab="leitores">Leitores</button>
-  </nav>
-  <div class="head-actions">
-    <button class="btn" id="profile-btn" hidden>Meu perfil</button>
-    <button class="btn" id="auth-btn">Entrar</button>
-  </div>
-</header>
+<div class="wrap">
+  <header>
+    <button class="logo" id="logo">Estante</button>
+    <nav aria-label="Seções">
+      <button data-tab="recomendar" aria-current="page">Recomendar</button>
+      <button data-tab="estante">Minha estante</button>
+      <button data-tab="mais-lidos">Mais lidos</button>
+      <button data-tab="leitores">Leitores</button>
+      <button class="account" id="account">Entrar</button>
+    </nav>
+  </header>
 
-<main>
-  <section id="recomendar" class="wrap">
-    <h1>O que você quer ler agora?</h1>
-    <label for="text" class="note tight">Descreva o livro ou escolha características.</label>
-    <textarea id="text" maxlength="500" placeholder="Ex.: web novel com segunda chance, protagonista sem poderes"></textarea>
-    <div class="tags" id="tags"></div>
-    <p class="note tight" id="login-hint">Dez sugestões de uma vez, com sinopse, capa e onde comprar. Entre na sua conta para pedir.</p>
-    <button class="btn main" id="go">Recomendar</button>
-    <button class="btn" id="go-shelf" hidden>Recomendar pela minha estante</button>
-    <div id="out" aria-live="polite"></div>
-    <div id="preview" class="preview" hidden></div>
-  </section>
+  <main>
+    <!-- ============ Recomendar ============ -->
+    <section id="recomendar">
+      <div class="ask">
+        <div class="ask-left">
+          <h1>O que você quer ler agora?</h1>
+          <div>
+            <label class="lbl" for="text">Descreva o livro</label>
+            <textarea id="text" rows="3" maxlength="500" placeholder="um livro que…"></textarea>
+          </div>
+          <div class="ask-go">
+            <button class="btn-red" id="go">Recomendar →</button>
+            <p class="said">Dez sugestões, com sinopse, capa e onde comprar.</p>
+          </div>
+        </div>
 
-  <section id="top" class="wide" hidden>
-    <p class="note" id="top-updated" style="margin:24px 0 0"></p>
-    <h2 style="margin-top:8px">Best-sellers do New York Times</h2>
-    <p class="note tight">Listas da semana, nos EUA. As sinopses são traduzidas automaticamente. Fonte: <a href="https://www.nytimes.com/books/best-sellers/" target="_blank" rel="noopener">The New York Times Best Sellers</a>.</p>
-    <div class="filters" id="nyt-tabs" role="group" aria-label="Listas do New York Times"></div>
-    <div id="nyt-area"></div>
-    <h2>Mais lidos por gênero</h2>
-    <p class="note tight">Ranking do Open Library, por quantas pessoas colocaram o livro em suas listas de leitura. Cobre pouco as web novels. As sinopses são traduzidas automaticamente.</p>
-    <div class="filters" id="top-tabs" role="group" aria-label="Gêneros"></div>
-    <div id="top-area"></div>
-  </section>
+        <form class="chars" id="chars">
+          <div class="chars-head">
+            <span>ou escolha características</span>
+            <button type="button" class="clear" id="chars-clear" hidden>Limpar (0)</button>
+          </div>
+          <div id="chars-groups"></div>
+          <p class="chars-foot" id="chars-foot"></p>
+        </form>
+      </div>
 
-  <section id="leitores" class="wide" hidden>
-    <h2>Leitores</h2>
-    <div id="readers-area"></div>
-  </section>
+      <div id="rec-state" aria-live="polite"></div>
+    </section>
 
-  <section id="estante" class="wide" hidden>
-    <h2>Minha estante</h2>
-    <div id="shelf-area"></div>
-  </section>
-</main>
+    <!-- ============ Minha estante ============ -->
+    <section id="estante" hidden>
+      <div class="page-head">
+        <div>
+          <h1>Minha estante</h1>
+          <p class="said" id="shelf-sum"></p>
+        </div>
+        <button class="btn-red" id="go-shelf" hidden>Recomendar pela minha estante →</button>
+      </div>
+      <div id="shelf-area"></div>
+    </section>
 
-<footer><button class="link" id="privacy-btn">Privacidade e dados</button></footer>
+    <!-- ============ Mais lidos ============ -->
+    <section id="mais-lidos" hidden>
+      <div class="page-head">
+        <h1>Mais lidos</h1>
+        <div class="seg" id="src-seg" role="group" aria-label="Fonte do ranking">
+          <button data-src="nyt" aria-pressed="true">New York Times</button>
+          <button data-src="ol" aria-pressed="false">Open Library</button>
+        </div>
+      </div>
+      <div class="tabs" id="top-tabs" role="group" aria-label="Listas"></div>
+      <div id="top-area"></div>
+      <p class="src-note" id="top-note"></p>
+    </section>
 
+    <!-- ============ Leitores ============ -->
+    <section id="leitores" hidden>
+      <div class="page-head"><h1>Leitores</h1></div>
+      <p class="said">Estantes públicas de outros leitores. Siga para acompanhar o que estão lendo.</p>
+      <div id="readers-area"></div>
+    </section>
+  </main>
+
+  <footer>
+    <span>Estante</span>
+    <button id="privacy-btn">Privacidade e dados</button>
+  </footer>
+</div>
+
+<!-- ============ Modais ============ -->
 <dialog id="auth-dlg">
-  <form id="auth-form" method="dialog">
-    <h2 id="auth-title">Entrar</h2>
-    <button type="button" class="btn" id="google-btn" hidden style="width:100%">Entrar com Google</button>
-    <p class="or" id="auth-or" hidden>ou com e-mail</p>
-    <label for="email">E-mail</label>
+  <div class="modal-head"><h2>Entrar</h2><button class="close" id="auth-close">Fechar ✕</button></div>
+  <form class="modal-body" id="auth-form">
+    <button type="button" class="btn-out wide" id="google-btn" hidden>Entrar com Google</button>
+    <label class="lbl" for="email">E-mail</label>
     <input id="email" type="email" autocomplete="email" required>
-    <label for="pass">Senha</label>
+    <label class="lbl" for="pass">Senha</label>
     <input id="pass" type="password" autocomplete="current-password" minlength="6" required>
+    <button type="button" class="linkish" id="auth-reset">Esqueci a senha</button>
     <p class="err" id="auth-err" role="alert"></p>
-    <button type="button" class="link" id="auth-reset">Esqueci a senha</button>
-    <div class="row">
-      <button class="btn main" id="auth-submit" type="submit">Entrar</button>
-      <button class="link" id="auth-switch" type="button">Criar conta</button>
-      <button class="link" id="auth-close" type="button" style="margin-left:auto">Fechar</button>
+    <div class="modal-acts">
+      <button class="btn-red" id="auth-submit" type="submit">Entrar</button>
+      <button class="btn-out" id="auth-signup" type="button">Criar conta</button>
     </div>
   </form>
 </dialog>
 
 <dialog id="profile-dlg">
-  <form id="profile-form" method="dialog">
-    <h2>Meu perfil</h2>
-    <label for="p-name">Nome</label>
+  <div class="modal-head"><h2>Meu perfil</h2><button class="close" id="profile-close">Fechar ✕</button></div>
+  <form class="modal-body" id="profile-form">
+    <label class="lbl" for="p-name">Nome</label>
     <input type="text" id="p-name" maxlength="40" autocomplete="name">
-    <p class="hint">É o nome que aparece nos seus comentários.</p>
-    <label class="check" for="p-public"><input type="checkbox" id="p-public"><span>Deixar minha estante pública: outros leitores poderão vê-la e me seguir.</span></label>
+    <p class="said small">É o nome que aparece nos seus comentários.</p>
+    <label class="check" for="p-public"><input type="checkbox" id="p-public"><span class="box"></span><span>Deixar minha estante pública: outros leitores poderão vê-la e me seguir.</span></label>
     <p class="err" id="p-msg" role="status"></p>
-    <div class="row"><button class="btn main" type="submit">Salvar perfil</button>
-      <button class="link" id="profile-close" type="button" style="margin-left:auto">Fechar</button></div>
+    <div class="modal-acts">
+      <button class="btn-red" type="submit">Salvar perfil</button>
+      <button class="signout" id="signout" type="button">Sair da conta</button>
+    </div>
   </form>
 </dialog>
 
 <dialog id="privacy-dlg">
-  <h2>Privacidade e dados</h2>
-  <h3>O que guardamos</h3>
-  <p>Seu e-mail e nome (login pelo Firebase, do Google), sua estante (livros, status e nota), seus comentários e curtidas e quem você segue.</p>
-  <h3>O que é público</h3>
-  <p>Seus comentários, com o nome que você escolheu. Sua estante e seu nome na lista de Leitores só ficam visíveis se você ativar isso no perfil. O resto é privado.</p>
-  <h3>Com quem os dados passam</h3>
-  <ul>
-    <li>Google Firebase: hospedagem, login e banco de dados.</li>
-    <li>Anthropic (Claude): recebe o texto do seu pedido e, na recomendação pela estante, os títulos, status e notas dos seus livros. Não recebe seu e-mail nem seu nome.</li>
-    <li>Open Library e New York Times: só fornecem listas e informações de livros.</li>
-  </ul>
-  <h3>Por quanto tempo</h3>
-  <p>Até você excluir a conta.</p>
-  <h3>Seus direitos</h3>
-  <p>Você vê tudo no próprio site, corrige o perfil e os comentários quando quiser e pode excluir tudo abaixo: estante, comentários, curtidas, seguidos, perfil e o login.</p>
-  <div id="delete-box" hidden>
-    <label for="delete-confirm">Para excluir, digite EXCLUIR</label>
-    <input id="delete-confirm" autocomplete="off">
-    <p class="err" id="delete-err" role="alert"></p>
-    <div class="row"><button class="danger" id="delete-btn" disabled>Excluir minha conta e meus dados</button>
-      <button class="link" id="privacy-close" type="button" style="margin-left:auto">Fechar</button></div>
+  <div class="modal-head"><h2>Privacidade e dados</h2><button class="close" id="privacy-close">Fechar ✕</button></div>
+  <div class="modal-body priv">
+    <div class="priv-row"><h3>O que guardamos</h3>
+      <p>Seu e-mail e nome (login pelo Firebase, do Google), sua estante (livros, status e nota), seus comentários e curtidas e quem você segue.</p></div>
+    <div class="priv-row"><h3>O que é público</h3>
+      <p>Seus comentários, com o nome que você escolheu. Sua estante e seu nome na lista de Leitores só ficam visíveis se você ativar isso no perfil. O resto é privado.</p></div>
+    <div class="priv-row"><h3>Com quem os dados passam</h3>
+      <p>Google Firebase: hospedagem, login e banco de dados.<br>
+         Anthropic (Claude): recebe o texto do seu pedido e, na recomendação pela estante, os títulos, status e notas dos seus livros. Não recebe seu e-mail nem seu nome.<br>
+         Open Library e New York Times: só fornecem listas e informações de livros.</p></div>
+    <div class="priv-row"><h3>Por quanto tempo</h3>
+      <p>Até você excluir a conta.</p></div>
+    <div class="priv-row"><h3>Seus direitos</h3>
+      <p>Você vê tudo no próprio site, corrige o perfil e os comentários quando quiser e pode excluir tudo: estante, comentários, curtidas, seguidos, perfil e o login.</p></div>
+    <div id="delete-box" hidden>
+      <button class="btn-danger" id="delete-start">Excluir minha conta e dados</button>
+      <div id="delete-confirm-box" hidden>
+        <label class="lbl" for="delete-confirm">Para excluir, digite EXCLUIR</label>
+        <input id="delete-confirm" autocomplete="off">
+        <p class="err" id="delete-err" role="alert"></p>
+        <button class="btn-danger" id="delete-btn" disabled>Excluir tudo agora</button>
+      </div>
+    </div>
   </div>
-  <div class="row" id="privacy-only-close"><button class="link" id="privacy-close2" type="button" style="margin-left:auto">Fechar</button></div>
 </dialog>
 
 <script type="module" src="app.js"></script>

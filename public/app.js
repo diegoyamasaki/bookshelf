@@ -20,57 +20,81 @@ const safeUrl = (u) => (/^https:\/\//.test(u || "") ? esc(u) : "");
 // Letras e números de qualquer alfabeto (títulos em japonês, cirílico etc. não podem colidir).
 // Usa o título original, para o mesmo livro ter o mesmo id (e os mesmos comentários) em qualquer idioma.
 const bookId = (b) => ((b.originalTitle || b.title) + " " + b.author).normalize("NFD").replace(/\p{M}/gu, "").toLowerCase().replace(/[^\p{L}\p{N}]+/gu, "-").slice(0, 120);
-
 // Nos rankings o título vem em inglês com `titlePt` ao lado; na estante e nas recomendações já vem traduzido
 const titleOf = (b) => b.titlePt || b.title;
+const hash = (s) => [...String(s)].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
+
+const SPINE = ["#7a2e2a", "#1f2a4a", "#2f4a3a", "#a8742a", "#4a5466", "#5a3550", "#2d5b63", "#8c4a2f", "#3a3a32", "#6b5a2a"];
+const colorOf = (b) => SPINE[hash(bookId(b)) % SPINE.length];
+const STATUS = { quero: "Quero ler", lendo: "Lendo", lido: "Lido" };
+const NEXT = { quero: "lendo", lendo: "lido", lido: "quero" };
+const statusOf = (b) => b.status || "lido"; // livros antigos não têm status
 
 let user = null;
-let shelf = []; // livros da estante do usuário
-let unsub = null;
-let selected = null;
-let lastRecs = [];
-let cUnsub = null; // listener dos comentários do livro aberto
-let myComment = null;
-let pending = null; // ação de quem clicou antes de entrar, executada depois do login
+let shelf = [];
+let pending = null; // ação de quem clicou antes de entrar, repetida depois do login
+let unsub = null, pUnsub = null, fUnsub = null, rUnsub = null, cUnsub = null;
 
-// --- abas
-const TABS = ["recomendar", "estante", "top", "leitores"];
+// ======================= navegação =======================
+const TABS = ["recomendar", "estante", "mais-lidos", "leitores"];
 function showTab(name, keep) {
   for (const s of TABS) $(s).hidden = s !== name;
-  document.querySelectorAll("nav button").forEach((b) =>
+  document.querySelectorAll("nav button[data-tab]").forEach((b) =>
     b.dataset.tab === name ? b.setAttribute("aria-current", "page") : b.removeAttribute("aria-current"));
-  // uma entrada de histórico por aba: o botão voltar do navegador volta à aba anterior
+  // uma entrada de histórico por tela: o botão voltar do navegador volta à tela anterior
   if (location.hash !== "#" + name) history[keep ? "replaceState" : "pushState"](null, "", "#" + name);
-  if (name === "top") loadTop();
+  if (name === "mais-lidos") loadTop();
   if (name === "estante") renderShelf();
   if (name === "leitores") { readersCache = null; renderReaders(); }
+  if (!keep) scrollTo(0, 0);
 }
-document.querySelectorAll("nav button").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
-const tabFromHash = () => (TABS.includes(location.hash.slice(1)) ? location.hash.slice(1) : "recomendar");
+const tabFromHash = () => {
+  const h = location.hash.slice(1);
+  if (h === "top") return "mais-lidos"; // endereço antigo
+  return TABS.includes(h) ? h : "recomendar";
+};
+document.querySelectorAll("nav button[data-tab]").forEach((b) => (b.onclick = () => showTab(b.dataset.tab)));
+$("logo").onclick = () => showTab("recomendar");
 addEventListener("popstate", () => showTab(tabFromHash(), true));
 
-// --- login
-let signingUp = false;
-function authMode(up) {
-  signingUp = up;
-  $("auth-title").textContent = up ? "Criar conta" : "Entrar";
-  $("auth-submit").textContent = up ? "Criar conta" : "Entrar";
-  $("auth-switch").textContent = up ? "Já tenho conta" : "Criar conta";
-  $("pass").autocomplete = up ? "new-password" : "current-password";
-  $("auth-reset").hidden = up;
+// ======================= conta =======================
+function openAuth() {
   $("auth-err").textContent = "";
   $("auth-err").classList.remove("ok");
+  $("auth-dlg").showModal();
+  $("email").focus();
 }
-function openAuth() { authMode(false); $("auth-dlg").showModal(); $("email").focus(); }
-// Guarda a ação de quem ainda não entrou (pedir recomendação, adicionar livro) e a repete depois do login
+// Guarda a ação de quem ainda não entrou (pedir recomendação, salvar livro) e a repete depois do login
 function requireLogin(fn) {
   if (user) return true;
   pending = fn;
   openAuth();
   return false;
 }
-$("auth-btn").onclick = () => { if (user) return signOut(auth); pending = null; openAuth(); };
-$("auth-switch").onclick = () => authMode(!signingUp);
+const AUTH_ERR = {
+  "auth/invalid-credential": "E-mail ou senha incorretos.",
+  "auth/email-already-in-use": "Já existe uma conta com esse e-mail. Use Entrar.",
+  "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
+  "auth/invalid-email": "Esse e-mail não parece válido.",
+  "auth/too-many-requests": "Muitas tentativas. Espere um pouco e tente de novo.",
+};
+async function doAuth(fn) {
+  const err = $("auth-err");
+  err.classList.remove("ok");
+  err.textContent = "";
+  try {
+    await fn(auth, $("email").value, $("pass").value);
+    $("auth-dlg").close();
+    $("auth-form").reset();
+  } catch (e) {
+    err.textContent = AUTH_ERR[e.code] || "Não foi possível entrar. Tente de novo.";
+  }
+}
+$("auth-form").onsubmit = (e) => { e.preventDefault(); doAuth(signInWithEmailAndPassword); };
+$("auth-signup").onclick = () => {
+  if (!$("auth-form").reportValidity()) return;
+  doAuth(createUserWithEmailAndPassword);
+};
 $("auth-close").onclick = () => { pending = null; $("auth-dlg").close(); };
 $("auth-reset").onclick = async () => {
   const err = $("auth-err");
@@ -80,255 +104,32 @@ $("auth-reset").onclick = async () => {
   err.classList.add("ok"); // mesma resposta exista a conta ou não
   err.textContent = "Se existir uma conta com esse e-mail, enviamos um link para redefinir a senha.";
 };
-const AUTH_ERR = {
-  "auth/invalid-credential": "E-mail ou senha incorretos.",
-  "auth/email-already-in-use": "Já existe uma conta com esse e-mail. Use Entrar.",
-  "auth/weak-password": "A senha precisa ter pelo menos 6 caracteres.",
-  "auth/invalid-email": "Esse e-mail não parece válido.",
-  "auth/too-many-requests": "Muitas tentativas. Espere um pouco e tente de novo.",
-};
-$("auth-form").onsubmit = async (e) => {
-  e.preventDefault();
-  try {
-    const fn = signingUp ? createUserWithEmailAndPassword : signInWithEmailAndPassword;
-    await fn(auth, $("email").value, $("pass").value);
-    $("auth-dlg").close();
-    $("auth-form").reset();
-  } catch (err) {
-    $("auth-err").textContent = AUTH_ERR[err.code] || "Não foi possível entrar. Tente de novo.";
-  }
-};
-
-let pUnsub = null;
-let fUnsub = null;
 // Ligue depois de ativar o Google em Authentication > Sign-in method no console do Firebase
 const GOOGLE_LOGIN = true;
-$("google-btn").hidden = $("auth-or").hidden = !GOOGLE_LOGIN;
+$("google-btn").hidden = !GOOGLE_LOGIN;
 $("google-btn").onclick = async () => {
   try {
     await signInWithPopup(auth, new GoogleAuthProvider());
     $("auth-dlg").close();
-  } catch (err) {
-    if (err.code !== "auth/popup-closed-by-user") $("auth-err").textContent = "Não foi possível entrar com o Google. Tente de novo.";
+  } catch (e) {
+    if (e.code !== "auth/popup-closed-by-user") $("auth-err").textContent = "Não foi possível entrar com o Google. Tente de novo.";
   }
 };
-
-onAuthStateChanged(auth, (u) => {
-  user = u;
-  $("auth-btn").textContent = u ? "Sair" : "Entrar";
-  $("profile-btn").hidden = !u;
-  [unsub, pUnsub, fUnsub, rUnsub].forEach((f) => f?.());
-  shelf = [];
-  selected = null;
-  myProfile = null;
-  following = new Set();
-  readersCache = null;
-  readerView = null;
-  if (u) {
-    unsub = onSnapshot(collection(db, "users", u.uid, "books"), (snap) => {
-      shelf = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
-      syncShelfBtn();
-      renderShelf();
-      renderRecs();
-      renderTop();
-    });
-    pUnsub = onSnapshot(doc(db, "profiles", u.uid), (d) => {
-      myProfile = d.data() ?? null;
-      if (!$("leitores").hidden && !readerView) renderReaders();
-    });
-    fUnsub = onSnapshot(collection(db, "users", u.uid, "following"), (snap) => {
-      following = new Set(snap.docs.map((d) => d.id));
-      if ($("leitores").hidden) return;
-      if (readerView) renderReaders(); else if ($("readers-list")) loadReadersList();
-    });
-  }
-  syncShelfBtn();
-  renderShelf();
-  renderRecs();
-  renderTop();
-  renderPreview();
-  renderReaders();
-  if (u && pending) { const p = pending; pending = null; p(); }
-});
-
-// --- estante
-const COLORS = ["#8c3b3b", "#2f5d62", "#6b5b95", "#a87631", "#3d6b4f", "#a24f78"];
-const hash = (s) => [...s].reduce((h, c) => (h * 31 + c.charCodeAt(0)) >>> 0, 7);
-// Sem capa no Open Library (web novels, edições raras): capa gerada com o título, na cor da lombada
-const coverHtml = (b) => safeUrl(b.cover)
-  ? `<img class="cover" src="${safeUrl(b.cover)}" alt="Capa de ${esc(titleOf(b))}" loading="lazy">`
-  : `<div class="cover ph" style="background:${COLORS[hash(bookId(b)) % COLORS.length]}" role="img"
-       aria-label="Sem capa: ${esc(titleOf(b))}, de ${esc(b.author)}"><b>${esc(titleOf(b))}</b><span>${esc(b.author)}</span></div>`;
-
-const STATUS = { lido: "Lido", lendo: "Lendo", quero: "Quero ler" };
-const statusOf = (b) => b.status || "lido"; // livros antigos não têm status
-let filter = "todos";
-
-const stars = (rating, editable) => [1, 2, 3, 4, 5].map((n) =>
-  `<button ${editable ? `data-r="${n}"` : "disabled"} aria-pressed="${n <= rating}" aria-label="${n} de 5">★</button>`).join("");
-
-function shelfHtml(books, sel) {
-  const count = (k) => books.filter((b) => k === "todos" || statusOf(b) === k).length;
-  const chips = ["todos", "lido", "lendo", "quero"].map((k) =>
-    `<button class="chip" data-f="${k}" aria-pressed="${filter === k}">${k === "todos" ? "Todos" : STATUS[k]} (${count(k)})</button>`).join("");
-  const shown = books.filter((b) => filter === "todos" || statusOf(b) === filter);
-  const spines = shown.map((b) => {
-    const h = hash(b.id);
-    return `<div class="shelf-item"><button class="spine" data-id="${esc(b.id)}" data-status="${statusOf(b)}" aria-expanded="${sel === b.id}"
-      title="${esc(b.title)}" style="background:${COLORS[h % COLORS.length]};height:${150 + (h % 60)}px;width:${38 + (h % 14)}px">${esc(b.title)}</button></div>`;
-  }).join("");
-  return `<div class="filters">${chips}</div>${shown.length ? `<div class="shelf">${spines}</div>` : `<p class="empty" style="margin-top:24px">Nenhum livro com esse status.</p>`}<div class="detail" hidden></div>`;
+// Clicar fora de um modal fecha
+for (const d of document.querySelectorAll("dialog")) {
+  d.onclick = (e) => { if (e.target === d) { pending = null; d.close(); } };
 }
 
-function detailHtml(b, mine) {
-  const status = statusOf(b);
-  const controls = mine
-    ? `<div class="seg" role="group" aria-label="Status">${Object.entries(STATUS).map(([k, v]) => `<button data-s="${k}" aria-pressed="${status === k}">${v}</button>`).join("")}</div>
-       <div class="stars" role="group" aria-label="Sua nota">${stars(b.rating || 0, true)}</div>
-       ${b.rating ? `<p class="hint">Toque na mesma estrela para limpar a nota.</p>` : ""}`
-    : `<div class="note" style="margin:8px 0 0">${STATUS[status]}</div><div class="stars" role="img" aria-label="Nota ${b.rating || 0} de 5">${stars(b.rating || 0, false)}</div>`;
-  return `${coverHtml(b)}
-    <div><h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
-      ${controls}
-      <p style="margin:12px 0;display:flex;gap:16px;align-items:center">
-        ${safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : ""}
-        ${mine ? `<button class="btn remove">Remover da estante</button>` : ""}</p></div>
-    <div class="comments">
-      <h4>Comentários</h4>
-      ${mine ? `${user.displayName ? "" : `<input class="c-name" maxlength="40" placeholder="Seu nome" aria-label="Seu nome" style="margin-bottom:8px">`}
-        <textarea class="c-text" maxlength="500" placeholder="O que você achou deste livro?" aria-label="Seu comentário"></textarea>
-        <div class="row"><button class="btn main c-save">Publicar comentário</button>
-          <button class="link c-del" hidden>Excluir meu comentário</button><span class="err c-err" role="alert"></span></div>` : ""}
-      <div class="c-list"></div>
-    </div>`;
-}
-
-// Desenha uma estante (a minha, editável, ou a de outro leitor, só leitura) e liga os comentários do livro aberto
-function drawShelf(area, books, sel, onSel, mine) {
-  cUnsub?.();
-  cUnsub = null;
-  const draft = area.dataset.sel === sel ? area.querySelector(".c-text")?.value : ""; // não perder o rascunho ao mudar status/nota
-  area.dataset.sel = sel ?? "";
-  area.innerHTML = shelfHtml(books, sel);
-  area.querySelectorAll(".chip").forEach((c) => (c.onclick = () => { filter = c.dataset.f; onSel(null); }));
-  area.querySelectorAll(".spine").forEach((s) => (s.onclick = () => onSel(sel === s.dataset.id ? null : s.dataset.id)));
-  const b = books.find((x) => x.id === sel);
-  const d = area.querySelector(".detail");
-  if (!b || !d) return;
-  d.hidden = false;
-  d.innerHTML = detailHtml(b, mine);
-  if (mine) {
-    const ref = doc(db, "users", user.uid, "books", b.id);
-    d.querySelector(".remove").onclick = async () => { onSel(null); await deleteDoc(ref); };
-    d.querySelectorAll("[data-s]").forEach((x) => (x.onclick = () => updateDoc(ref, { status: x.dataset.s })));
-    d.querySelectorAll("[data-r]").forEach((x) => (x.onclick = () => {
-      const n = Number(x.dataset.r);
-      updateDoc(ref, { rating: n === (b.rating || 0) ? 0 : n }); // tocar na mesma nota limpa
-    }));
-    d.querySelector(".c-save").onclick = () => saveComment(d, b);
-    d.querySelector(".c-del").onclick = () => deleteDoc(doc(db, "books", b.id, "comments", user.uid));
-    if (draft) d.querySelector(".c-text").value = draft;
-  }
-  d.querySelector(".c-list").onclick = (e) => {
-    const btn = e.target.closest(".like");
-    if (btn) updateDoc(doc(db, "books", b.id, "comments", btn.dataset.uid),
-      { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-  };
-  cUnsub = onSnapshot(collection(db, "books", b.id, "comments"), (snap) => renderComments(d, snap.docs.map((x) => x.data()), mine));
-}
-
-function renderShelf() {
-  if ($("estante").hidden) return; // evita mexer nos comentários abertos em outra aba
-  const area = $("shelf-area");
-  if (!user) {
-    cUnsub?.();
-    area.innerHTML = `<p class="empty">Entre para montar sua estante e guardar os livros que você já leu.</p><button class="btn main" id="shelf-login">Entrar</button>`;
-    $("shelf-login").onclick = openAuth;
-    return;
-  }
-  if (!shelf.length) {
-    cUnsub?.();
-    area.innerHTML = `<p class="empty">Sua estante está vazia. Peça uma recomendação, ou veja os mais lidos, e use Adicionar à estante.</p>`;
-    return;
-  }
-  drawShelf(area, shelf, selected, (id) => { selected = id; renderShelf(); }, true);
-}
-
-// --- comentários
-function commentsHtml(list) {
-  const n = (c) => new Set(c.likes).size;
-  list.sort((a, b) => n(b) - n(a) || (a.createdAt?.seconds ?? 1e12) - (b.createdAt?.seconds ?? 1e12));
-  return list.length ? list.map((c) => {
-    const liked = c.likes.includes(user.uid);
-    return `<div class="c"><b>${esc(c.name)}</b><p>${esc(c.text)}</p>
-      <button class="like" data-uid="${esc(c.uid)}" aria-pressed="${liked}" aria-label="${liked ? "Descurtir" : "Curtir"} comentário de ${esc(c.name)}">♥ ${n(c)}</button></div>`;
-  }).join("") : `<p class="note">Ninguém comentou este livro ainda.</p>`;
-}
-
-function renderComments(d, list, mine) {
-  if (mine) {
-    myComment = list.find((c) => c.uid === user.uid) || null;
-    const text = d.querySelector(".c-text");
-    if (myComment && !text.value) text.value = myComment.text;
-    d.querySelector(".c-save").textContent = myComment ? "Atualizar comentário" : "Publicar comentário";
-    d.querySelector(".c-del").hidden = !myComment;
-  }
-  d.querySelector(".c-list").innerHTML = commentsHtml(list);
-}
-
-async function saveComment(d, b) {
-  const text = d.querySelector(".c-text").value.trim();
-  const name = user.displayName || d.querySelector(".c-name")?.value.trim();
-  const err = d.querySelector(".c-err");
-  err.textContent = "";
-  if (!text) { err.textContent = "Escreva um comentário antes de publicar."; return; }
-  if (!name) { err.textContent = "Diga seu nome para aparecer nos comentários."; return; }
-  try {
-    if (!user.displayName) await updateProfile(user, { displayName: name });
-    const ref = doc(db, "books", b.id, "comments", user.uid);
-    if (myComment) await updateDoc(ref, { text, name });
-    else await setDoc(ref, { uid: user.uid, name, text, likes: [], createdAt: serverTimestamp() });
-  } catch (e) {
-    err.textContent = "Não foi possível publicar. Tente de novo.";
-  }
-}
-
-// --- leitores: perfil público, seguir e ver a estante dos outros
-let myProfile = null;
-let following = new Set();
-let readersCache = null;
-let readersTab = "todos";
-let readerView = null; // { uid, name } do leitor aberto
-let readerBooks = [];
-let rSel = null;
-let rUnsub = null;
-
-function renderReaders() {
-  if ($("leitores").hidden) return;
-  const area = $("readers-area");
-  if (!user) {
-    area.innerHTML = `<p class="empty">Entre para ver outros leitores e as estantes públicas deles.</p><button class="btn main" id="readers-login">Entrar</button>`;
-    $("readers-login").onclick = openAuth;
-    return;
-  }
-  if (readerView) return renderReader(area);
-  area.innerHTML = `${myProfile?.shelfPublic ? "" : `<p class="note tight">Sua estante está privada: você vê os outros, mas ninguém vê a sua. Abra <b>Meu perfil</b> para mudar isso.</p>`}
-    <div class="filters">${["todos", "seguindo"].map((k) =>
-      `<button class="chip" data-rt="${k}" aria-pressed="${readersTab === k}">${k === "todos" ? "Todos" : "Seguindo"}</button>`).join("")}</div>
-    <div id="readers-list"><p class="note">Carregando.</p></div>`;
-  area.querySelectorAll("[data-rt]").forEach((c) => (c.onclick = () => { readersTab = c.dataset.rt; renderReaders(); }));
-  loadReadersList();
-}
-
-// --- perfil: nome público e estante pública, no botão Meu perfil do cabeçalho
-$("profile-btn").onclick = () => {
-  $("p-name").value = myProfile?.name ?? user?.displayName ?? "";
+$("account").onclick = () => {
+  if (!user) { pending = null; return openAuth(); }
+  $("p-name").value = myProfile?.name ?? user.displayName ?? "";
   $("p-public").checked = !!myProfile?.shelfPublic;
   $("p-msg").textContent = "";
   $("p-msg").classList.remove("ok");
   $("profile-dlg").showModal();
 };
 $("profile-close").onclick = () => $("profile-dlg").close();
+$("signout").onclick = () => { $("profile-dlg").close(); signOut(auth); };
 $("profile-form").onsubmit = async (e) => {
   e.preventDefault();
   const name = $("p-name").value.trim();
@@ -347,276 +148,215 @@ $("profile-form").onsubmit = async (e) => {
   }
 };
 
-async function loadReadersList() {
-  const box = $("readers-list");
-  try {
-    readersCache ??= (await getDocs(query(collection(db, "profiles"), where("shelfPublic", "==", true), limit(100))))
-      .docs.map((d) => ({ uid: d.id, ...d.data() })).filter((r) => r.uid !== user.uid);
-  } catch {
-    box.innerHTML = `<p class="note">Não foi possível carregar os leitores. Recarregue a página.</p>`;
-    return;
+onAuthStateChanged(auth, (u) => {
+  user = u;
+  [unsub, pUnsub, fUnsub, rUnsub, cUnsub].forEach((f) => f?.());
+  unsub = pUnsub = fUnsub = rUnsub = cUnsub = null;
+  shelf = [];
+  myProfile = null;
+  following = new Set();
+  readersCache = null;
+  readerView = null;
+  openC = null;
+  if (u) {
+    unsub = onSnapshot(collection(db, "users", u.uid, "books"), (snap) => {
+      shelf = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
+      renderShelf();
+      renderRec();
+      renderTop();
+    });
+    pUnsub = onSnapshot(doc(db, "profiles", u.uid), (d) => {
+      myProfile = d.data() ?? null;
+      setAccountName();
+      if (!$("leitores").hidden && !readerView) renderReaders();
+    });
+    fUnsub = onSnapshot(collection(db, "users", u.uid, "following"), (snap) => {
+      following = new Set(snap.docs.map((d) => d.id));
+      if (!$("leitores").hidden) renderReaders();
+    });
   }
-  const list = readersCache.filter((r) => readersTab === "todos" || following.has(r.uid));
-  box.innerHTML = list.length ? list.map((r) => `<div class="reader"><strong>${esc(r.name)}</strong>
-      <span class="note rcount" data-count="${esc(r.uid)}"></span>
-      <button class="link" data-view="${esc(r.uid)}">Ver estante</button>
-      <button class="btn" data-follow="${esc(r.uid)}">${following.has(r.uid) ? "Seguindo" : "Seguir"}</button></div>`).join("")
-    : `<p class="note">${readersTab === "seguindo" ? "Você ainda não segue ninguém." : "Ainda não há outros leitores com estante pública."}</p>`;
-  list.forEach((r) => countBooks(r.uid));
-  if (readersTab === "seguindo") loadActivity(list); else $("activity")?.remove();
-  box.onclick = (e) => {
-    const v = e.target.closest("[data-view]");
-    const f = e.target.closest("[data-follow]");
-    if (v) openReader(readersCache.find((r) => r.uid === v.dataset.view));
-    if (f) toggleFollow(f.dataset.follow);
-  };
+  setAccountName();
+  charsFoot();
+  renderShelf();
+  renderRec();
+  renderTop();
+  renderReaders();
+  if (u && pending) { const p = pending; pending = null; p(); }
+});
+const setAccountName = () => {
+  $("account").textContent = user ? (myProfile?.name || user.displayName || "Minha conta") : "Entrar";
+};
+
+// ======================= capas e lombadas =======================
+// Sem capa no Open Library (web novels, edições raras): bloco na cor da lombada, com título e autor
+const coverBlock = (b) => safeUrl(b.cover)
+  ? `<img class="cover-block" src="${safeUrl(b.cover)}" alt="Capa de ${esc(titleOf(b))}" loading="lazy">`
+  : `<div class="cover-block ph" style="background:${colorOf(b)}" role="img"
+       aria-label="Sem capa: ${esc(titleOf(b))}, de ${esc(b.author)}"><b>${esc(titleOf(b))}</b><span>${esc(b.author)}</span></div>`;
+
+// Uma lombada. `opts`: n (número do ranking), sel, mark ("saved"|"reading"), status, base/varia a altura.
+function spineHtml(b, i, o = {}) {
+  const h = hash(bookId(b));
+  const w = 50 + (h % 17);
+  const base = o.base ?? 300;
+  const height = base + (h % 45) + (o.sel ? 24 : 0);
+  const mark = o.mark ? `<span class="mark ${o.mark}"></span>` : "";
+  return `<button class="spine" data-i="${i}" ${o.status ? `data-status="${o.status}"` : ""}
+    aria-pressed="${!!o.sel}" title="${esc(titleOf(b))}"
+    style="flex:${w} 0 ${w}px;height:${height}px;background:${o.color ?? colorOf(b)}">
+    ${o.n ? `<span class="n">${o.n}</span>` : ""}<span class="t">${esc(titleOf(b))}</span>${mark}</button>`;
 }
 
-const counts = {};
-async function countBooks(uid) {
+// Links de compra: busca pelo título em português quando conhecido
+function storeLinks(b, cls = "") {
+  const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
+  return `<a class="${cls}" href="https://www.amazon.com.br/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon →</a>
+    <a class="${cls}" href="https://www.estantevirtual.com.br/busca?q=${q}" target="_blank" rel="noopener">Estante Virtual →</a>`;
+}
+
+// ======================= Recomendar =======================
+const CHARS = [
+  ["Gênero", ["Fantasia", "Ficção científica", "Romance", "Suspense", "Terror", "Lit. brasileira", "Não ficção"]],
+  ["Clima", ["Leve", "Sombrio", "Emocionante", "Engraçado", "Reflexivo"]],
+  ["Tamanho", ["Curto", "Médio", "Longo", "Série"]],
+  ["Formato", ["Livro", "Web novel"]],
+];
+$("chars-groups").innerHTML = CHARS.map(([g, opts]) => `<div class="chars-row">
+  <span class="lbl">${esc(g)}</span>
+  <div class="chars-opts">${opts.map((o) => `<label class="opt">
+    <input type="checkbox" value="${esc(g)}: ${esc(o)}"><span class="box"></span><span>${esc(o)}</span></label>`).join("")}</div>
+</div>`).join("");
+
+const checked = () => [...document.querySelectorAll("#chars-groups input:checked")];
+const charsFoot = () => {
+  $("chars-foot").textContent = user
+    ? "A IA lê só o seu pedido, nunca seu e-mail ou nome."
+    : "Entre na sua conta para pedir.";
+};
+function syncClear() {
+  const n = checked().length;
+  $("chars-clear").hidden = !n;
+  $("chars-clear").textContent = `Limpar (${n})`;
+}
+$("chars").onchange = syncClear;
+$("chars-clear").onclick = () => { checked().forEach((i) => (i.checked = false)); syncClear(); };
+$("chars").onsubmit = (e) => e.preventDefault();
+
+let lastRecs = [];
+let recIdx = 0;
+let phase = "idle"; // idle | loading | results | fail
+let failMsg = "";
+let openRec = false; // comentários abertos no livro em foco
+const commentCounts = {};
+
+function renderRec() {
+  const box = $("rec-state");
+  if (phase === "idle") { box.innerHTML = ""; return; }
+  if (phase === "loading") { box.innerHTML = `<p class="loading">Procurando nas prateleiras…</p>`; return; }
+  if (phase === "fail") { box.innerHTML = `<p class="fail">${esc(failMsg)}</p>`; return; }
+  if (!lastRecs.length) { box.innerHTML = `<p class="fail">Nenhuma sugestão desta vez. Tente outras características.</p>`; return; }
+
+  const have = new Set(shelf.map((b) => b.id));
+  const b = lastRecs[recIdx];
+  const id = bookId(b);
+  const saved = have.has(id);
+  const n = commentCounts[id];
+  box.innerHTML = `<div class="res">
+    <div class="res-head">
+      <h2>Sua prateleira</h2>
+      <div class="res-head-r"><span>Clique numa lombada</span><button id="again">Pedir outras dez</button></div>
+    </div>
+    <div class="shelf-row" id="rec-shelf">${lastRecs.map((x, i) =>
+      spineHtml(x, i, { n: i + 1, sel: i === recIdx, color: SPINE[i % SPINE.length], mark: have.has(bookId(x)) ? "saved" : "" })).join("")}</div>
+    <div class="detail">
+      <div class="detail-l"><span class="d-rank">${recIdx + 1}</span>${coverBlock(b)}</div>
+      <div class="detail-r">
+        <p class="meta">Livro · ${esc(b.author)}</p>
+        <h3 class="d-title">${esc(titleOf(b))}</h3>
+        <p class="d-syn">${esc(b.why)}</p>
+        <div class="acts">
+          <button class="btn-mini ${saved ? "on" : ""}" id="rec-save" ${saved ? "disabled" : ""}>${saved ? "✓ Na estante" : "+ Quero ler"}</button>
+          <div class="store">
+            ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Open Library →</a>` : ""}
+            ${storeLinks(b)}
+          </div>
+        </div>
+        ${b.verified ? "" : `<p class="said small">Não encontrado no Open Library: web novels e edições raras costumam ficar de fora.</p>`}
+        ${n ? `<button class="c-link" id="rec-c">${openRec ? "Ocultar comentários" : `${n} ${n === 1 ? "comentário" : "comentários"}`}</button>` : ""}
+        ${openRec ? `<div class="cpanel" id="rec-cpanel"><p class="said small">Carregando comentários…</p></div>` : ""}
+        <div class="pager">
+          <button id="rec-prev">← Anterior</button>
+          <button id="rec-next">Próximo →</button>
+        </div>
+      </div>
+    </div>
+  </div>`;
+
+  $("again").onclick = () => recommend(lastUseShelf);
+  $("rec-shelf").onclick = (e) => {
+    const s = e.target.closest(".spine");
+    if (!s) return;
+    recIdx = Number(s.dataset.i);
+    openRec = false;
+    renderRec();
+  };
+  if (!saved) $("rec-save").onclick = () => addBook(b);
+  $("rec-prev").onclick = () => { recIdx = (recIdx + lastRecs.length - 1) % lastRecs.length; openRec = false; renderRec(); };
+  $("rec-next").onclick = () => { recIdx = (recIdx + 1) % lastRecs.length; openRec = false; renderRec(); };
+  if ($("rec-c")) $("rec-c").onclick = () => { openRec = !openRec; renderRec(); };
+
+  cUnsub?.(); cUnsub = null;
+  if (openRec) watchComments(id, $("rec-cpanel"), false);
+  if (user) countComments(id);
+}
+
+// Conta os comentários do livro em foco: a regra só deixa comentar quem tem o livro na estante,
+// então aqui o painel é de leitura e o link só aparece quando já existe comentário.
+async function countComments(id) {
+  if (commentCounts[id] !== undefined) return;
   try {
-    counts[uid] ??= (await getCountFromServer(collection(db, "users", uid, "books"))).data().count;
-    const el = document.querySelector(`[data-count="${CSS.escape(uid)}"]`);
-    if (el) el.textContent = `${counts[uid]} ${counts[uid] === 1 ? "livro" : "livros"}`;
+    commentCounts[id] = (await getCountFromServer(collection(db, "books", id, "comments"))).data().count;
+    if (commentCounts[id] && phase === "results" && bookId(lastRecs[recIdx]) === id) renderRec();
   } catch {}
 }
 
-// Últimos livros adicionados por quem você segue (só estantes públicas respondem)
-async function loadActivity(list) {
-  if (!list.length) { $("activity")?.remove(); return; }
-  const rows = (await Promise.all(list.slice(0, 15).map(async (r) => {
-    try {
-      const snap = await getDocs(query(collection(db, "users", r.uid, "books"), orderBy("addedAt", "desc"), limit(3)));
-      return snap.docs.map((d) => ({ name: r.name, ...d.data() }));
-    } catch { return []; }
-  }))).flat().sort((a, b) => (b.addedAt?.seconds ?? 0) - (a.addedAt?.seconds ?? 0)).slice(0, 10);
-  if (readersTab !== "seguindo" || !$("readers-list")) return;
-  $("activity")?.remove();
-  $("readers-list").insertAdjacentHTML("afterend", `<div class="activity" id="activity"><h3>Atividade recente</h3>${rows.length
-    ? `<ul>${rows.map((a) => `<li><b>${esc(a.name)}</b> adicionou <i>${esc(a.title)}</i> (${STATUS[a.status || "lido"]})</li>`).join("")}</ul>`
-    : `<p class="note">Ninguém que você segue adicionou livros ainda.</p>`}</div>`);
-}
-
-const toggleFollow = (uid) => following.has(uid)
-  ? deleteDoc(doc(db, "users", user.uid, "following", uid))
-  : setDoc(doc(db, "users", user.uid, "following", uid), { at: serverTimestamp() });
-
-function openReader(r) {
-  rUnsub?.();
-  readerView = r;
-  rSel = null;
-  readerBooks = [];
-  rUnsub = onSnapshot(collection(db, "users", r.uid, "books"), (snap) => {
-    readerBooks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
-    renderReaders();
-  }, () => { readerBooks = null; renderReaders(); }); // sem permissão: a pessoa deixou a estante privada
-  renderReaders();
-}
-
-function renderReader(area) {
-  area.innerHTML = `<button class="link" id="r-back">Voltar para leitores</button>
-    <h3 style="margin:16px 0 8px;font-size:1.5rem">${esc(readerView.name)}</h3>
-    <button class="btn" id="r-follow">${following.has(readerView.uid) ? "Seguindo" : "Seguir"}</button>
-    <div id="reader-shelf" style="margin-top:8px"></div>`;
-  $("r-back").onclick = () => { rUnsub?.(); rUnsub = null; cUnsub?.(); cUnsub = null; readerView = null; renderReaders(); };
-  $("r-follow").onclick = () => toggleFollow(readerView.uid);
-  const box = $("reader-shelf");
-  if (readerBooks === null) box.innerHTML = `<p class="empty">Esta estante não está mais pública.</p>`;
-  else if (!readerBooks.length) box.innerHTML = `<p class="empty">Esta estante ainda está vazia.</p>`;
-  else drawShelf(box, readerBooks, rSel, (id) => { rSel = id; renderReaders(); }, false);
-}
-
-// --- mais lidos (carregados do Firestore, atualizados 1x por dia pela função refreshBestsellers)
-let topData = null;
-let nytData = null;
-let topLoading = false;
-
-async function loadTop() {
-  if (topData || topLoading) return;
-  topLoading = true;
-  $("top-area").innerHTML = `<p class="note">Carregando os rankings.</p>`;
-  $("nyt-area").innerHTML = "";
-  try {
-    const d = (await getDoc(doc(db, "public", "bestsellers"))).data();
-    nytData = d?.lists ?? [];
-    topData = d?.genres ?? [];
-    const at = d?.updatedAt?.toDate();
-    const stale = at && Date.now() - at > 3 * 864e5;
-    $("top-updated").textContent = at ? `${stale ? "Os rankings podem estar desatualizados. " : ""}Atualizado em ${at.toLocaleDateString("pt-BR")}.` : "";
-  } catch {
-    nytData = [];
-    topData = [];
+let lastUseShelf = false;
+async function recommend(useShelf) {
+  if (!requireLogin(() => recommend(useShelf))) return;
+  const tags = checked().map((i) => i.value);
+  const text = $("text").value.trim();
+  if (!useShelf && !text && !tags.length) {
+    phase = "fail";
+    failMsg = "Escreva o que procura ou escolha uma característica.";
+    return renderRec();
   }
-  topLoading = false;
-  renderTop();
-  renderPreview();
-}
-
-// Busca pelo título em português (quando conhecido) e autor: o link direto do NYT leva à Amazon dos EUA
-function buyLinks(b) {
-  const q = encodeURIComponent(`${titleOf(b)} ${b.author}`);
-  return `<a href="https://www.amazon.com.br/s?k=${q}&i=stripbooks" target="_blank" rel="noopener">Amazon Brasil</a>
-    <a href="https://www.google.com/search?tbm=shop&q=${q}" target="_blank" rel="noopener">Google Shopping</a>`;
-}
-
-// Uma linha do ranking. `have` nulo = prévia de quem não entrou: sem botões de estante.
-const topRow = (b, i, attr, li, have) => `<li>
-  <span class="rank">${i + 1}</span>
-  ${coverHtml(b)}
-  <div>
-    <h3>${esc(titleOf(b))}</h3>
-    ${b.titlePt ? `<span class="orig">Título original: ${esc(b.title)}</span>` : ""}
-    <span class="by">${esc(b.author)}${b.weeks > 1 ? `, ${b.weeks} semanas na lista` : ""}</span>
-    ${b.synopsis ? `<p class="syn">${esc(b.synopsis)}</p>` : ""}
-    ${have ? `<div class="acts">${have.has(bookId(b))
-      ? `<button class="btn" disabled>Na estante</button><button class="link" data-goshelf>Ver na estante</button>`
-      : `<button class="btn" data-${attr}="${li}" data-i="${i}">Adicionar à estante</button>
-         <button class="link" data-${attr}="${li}" data-i="${i}" data-read="1">Já li este</button>`}</div>` : ""}
-    <p class="buy">Comprar: ${buyLinks(b)}</p>
-  </div></li>`;
-
-let nytTab = 0;
-let genreTab = 0;
-
-function renderTop() {
-  if (!topData) return;
-  const have = new Set(shelf.map((b) => b.id));
-  // uma lista por vez: 11 listas de 10 livros com sinopse não cabem numa página
-  const section = (lists, tabs, area, tab, attr, empty) => {
-    if (!lists.length) { $(tabs).innerHTML = ""; $(area).innerHTML = `<p class="note">${empty}</p>`; return; }
-    const li = Math.min(tab, lists.length - 1);
-    $(tabs).innerHTML = lists.map((l, i) =>
-      `<button class="chip" data-t="${i}" aria-pressed="${i === li}">${esc(l.name)}</button>`).join("");
-    $(area).innerHTML = `<ol class="top-list">${lists[li].books.map((b, i) => topRow(b, i, attr, li, have)).join("")}</ol>`;
-  };
-  section(nytData, "nyt-tabs", "nyt-area", nytTab, "n", "Não foi possível carregar os best-sellers. Recarregue a página.");
-  section(topData, "top-tabs", "top-area", genreTab, "g", "Não foi possível carregar os rankings. Recarregue a página.");
-}
-
-const topClick = (e, data, attr) => {
-  if (e.target.closest("[data-goshelf]")) return showTab("estante");
-  const b = e.target.closest(`[data-${attr}]`);
-  if (b) addBook(data[b.dataset[attr]].books[b.dataset.i], b.dataset.read ? "lido" : "quero");
-};
-$("nyt-area").onclick = (e) => topClick(e, nytData, "n");
-$("top-area").onclick = (e) => topClick(e, topData, "g");
-$("nyt-tabs").onclick = (e) => { const c = e.target.closest("[data-t]"); if (c) { nytTab = Number(c.dataset.t); renderTop(); } };
-$("top-tabs").onclick = (e) => { const c = e.target.closest("[data-t]"); if (c) { genreTab = Number(c.dataset.t); renderTop(); } };
-
-// Quem chega sem conta vê livros de verdade na primeira tela, não só o formulário
-function renderPreview() {
-  const box = $("preview");
-  if (user) { box.hidden = true; box.innerHTML = ""; return; }
-  if (!topData) return loadTop();
-  const l = nytData?.[0] || topData[0];
-  if (!l) { box.hidden = true; return; }
-  box.hidden = false;
-  box.innerHTML = `<h2>Enquanto isso, os mais lidos da semana</h2>
-    <p class="note tight">${esc(l.name)}, pela lista do New York Times.</p>
-    <ol class="top-list">${l.books.slice(0, 3).map((b, i) => topRow(b, i, null, 0, null)).join("")}</ol>
-    <button class="btn" id="preview-all">Ver todos os mais lidos</button>`;
-  $("preview-all").onclick = () => showTab("top");
-}
-
-// --- privacidade e exclusão de conta
-$("privacy-btn").onclick = () => {
-  $("delete-box").hidden = !user;
-  $("privacy-only-close").hidden = !!user;
-  $("delete-confirm").value = "";
-  $("delete-btn").disabled = true;
-  $("delete-err").textContent = "";
-  $("privacy-dlg").showModal();
-};
-$("privacy-close").onclick = $("privacy-close2").onclick = () => $("privacy-dlg").close();
-$("delete-confirm").oninput = () => { $("delete-btn").disabled = $("delete-confirm").value.trim() !== "EXCLUIR"; };
-$("delete-btn").onclick = async () => {
-  $("delete-btn").disabled = true;
+  lastUseShelf = useShelf;
+  phase = "loading";
+  openRec = false;
+  recIdx = 0;
+  renderRec();
+  $("go").disabled = $("go-shelf").disabled = true;
+  $("go").textContent = "Procurando…";
+  if (useShelf) showTab("recomendar");
   try {
-    const r = await fetch("/api/delete-account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken() }) });
-    if (!r.ok) throw new Error((await r.json()).error);
-    $("privacy-dlg").close();
-    await signOut(auth);
-    $("out").innerHTML = `<p class="note">Sua conta e seus dados foram excluídos.</p>`;
-    showTab("recomendar");
+    const body = { text, tags, idToken: await user.getIdToken(), exclude: shelf.map((b) => b.title) };
+    if (useShelf) body.shelf = shelf.slice(-40).map(({ title, author, status, rating }) => ({ title, author, status: status || "lido", rating: rating || 0 }));
+    const r = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+    const data = await r.json();
+    if (!r.ok) throw new Error(data.error);
+    lastRecs = data;
+    phase = "results";
   } catch (e) {
-    $("delete-err").textContent = e.message || "Não foi possível excluir agora. Tente de novo.";
-    $("delete-btn").disabled = false;
+    phase = "fail";
+    failMsg = e.message || "Não foi possível pedir agora. Tente de novo.";
+  } finally {
+    $("go").disabled = $("go-shelf").disabled = false;
+    $("go").textContent = "Recomendar →";
+    renderRec();
   }
-};
-
-// --- recomendações
-const TAGS = ["segunda chance", "sem poderes", "sem sistema", "reencarnação", "fantasia", "romance", "ficção científica", "mistério"];
-$("tags").innerHTML = TAGS.map((t) => `<label><input type="checkbox" value="${t}">${t}</label>`).join("");
-
-const openRecs = new Set(); // livros recomendados com comentários abertos
-const recUnsubs = new Map();
-
-function watchRec(id) {
-  recUnsubs.get(id)?.();
-  const box = $("out").querySelector(`[data-rc="${id}"]`);
-  if (!box) return;
-  recUnsubs.set(id, onSnapshot(collection(db, "books", id, "comments"),
-    (snap) => { box.hidden = false; box.innerHTML = commentsHtml(snap.docs.map((d) => d.data())); },
-    () => { box.hidden = false; box.innerHTML = `<p class="note">Não foi possível carregar os comentários.</p>`; }));
 }
-
-function toggleRecComments(b) {
-  if (!requireLogin(() => toggleRecComments(b))) return;
-  const id = bookId(b);
-  if (openRecs.delete(id)) { renderRecs(); return; }
-  openRecs.add(id);
-  renderRecs();
-}
-
-$("out").onclick = (e) => {
-  if (e.target.closest("[data-goshelf]")) return showTab("estante");
-  const btn = e.target.closest(".like");
-  if (btn && user) updateDoc(doc(db, "books", btn.closest("[data-rc]").dataset.rc, "comments", btn.dataset.uid),
-    { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
-};
-
-function renderRecs() {
-  recUnsubs.forEach((u) => u());
-  recUnsubs.clear();
-  if (!lastRecs.length) return;
-  const have = new Set(shelf.map((b) => b.id));
-  $("out").innerHTML = lastRecs.map((b, i) => `
-    <article class="rec">
-      ${coverHtml(b)}
-      <div>
-        <h3>${esc(b.title)}</h3><div class="by">${esc(b.author)}</div>
-        <p>${esc(b.why)}</p>
-        <div class="actions">
-          ${have.has(bookId(b))
-            ? `<button class="btn" disabled>Na estante</button><button class="link" data-goshelf>Ver na estante</button>`
-            : `<button class="btn" data-add="${i}">Adicionar à estante</button>`}
-          ${b.verified && safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Ver livro</a>` : `<span class="unverified">Não encontrado no Open Library (web novels e edições raras costumam ficar de fora).</span>`}
-          <button class="link" data-cm="${i}" hidden>Ver comentários</button>
-        </div>
-        <p class="buy">Comprar: ${buyLinks(b)}</p>
-        <div class="rc" data-rc="${bookId(b)}" hidden></div>
-      </div>
-    </article>`).join("");
-  $("out").querySelectorAll("[data-add]").forEach((btn) => (btn.onclick = () => addBook(lastRecs[btn.dataset.add])));
-  $("out").querySelectorAll("[data-cm]").forEach((btn) => (btn.onclick = () => toggleRecComments(lastRecs[btn.dataset.cm])));
-  if (user) { openRecs.forEach((id) => watchRec(id)); showCommentCounts(); } else openRecs.clear();
-}
-
-// O botão de comentários só aparece nos livros que já têm algum: na recomendação ninguém pode
-// comentar (a regra exige o livro na estante), então "Ver comentários (0)" seria um botão morto.
-const recCounts = {};
-function showCommentCounts() {
-  lastRecs.forEach(async (b, i) => {
-    const id = bookId(b);
-    try {
-      recCounts[id] ??= (await getCountFromServer(collection(db, "books", id, "comments"))).data().count;
-      const btn = $("out").querySelector(`[data-cm="${i}"]`);
-      if (!btn || !recCounts[id]) return;
-      btn.hidden = false;
-      btn.textContent = openRecs.has(id) ? "Ocultar comentários" : `Ver comentários (${recCounts[id]})`;
-    } catch {}
-  });
-}
+$("go").onclick = () => recommend(false);
+$("go-shelf").onclick = () => recommend(true);
 
 async function addBook(b, status = "quero") {
   if (!requireLogin(() => addBook(b, status))) return;
@@ -627,38 +367,451 @@ async function addBook(b, status = "quero") {
   });
 }
 
-const syncShelfBtn = () => {
+// ======================= Minha estante =======================
+let filter = "todos";
+let openC = null; // id do livro com o painel de comentários aberto
+
+const ratingHtml = (r, editable) => `<div class="rating" role="group" aria-label="${editable ? "Sua nota" : `Nota ${r || 0} de 5`}">${
+  [1, 2, 3, 4, 5].map((n) => `<button class="${n <= (r || 0) ? "on" : ""}" ${editable ? `data-r="${n}"` : "disabled"}
+    aria-pressed="${n <= (r || 0)}" aria-label="${n} de 5"></button>`).join("")}</div>`;
+
+function rowHtml(b, mine) {
+  const st = statusOf(b);
+  const n = commentCounts[b.id];
+  return `<div class="row" data-id="${esc(b.id)}">
+    <div class="row-id">
+      <span class="row-bar" style="background:${colorOf(b)}"></span>
+      <div><h3 class="row-title">${esc(b.title)}</h3><div class="row-author">${esc(b.author)}</div></div>
+    </div>
+    <div class="row-acts">
+      <button class="status-btn" data-s="${st}" ${mine ? "" : "disabled"}
+        ${mine ? `aria-label="Status: ${STATUS[st]}. Mudar para ${STATUS[NEXT[st]]}"` : ""}>${STATUS[st]}</button>
+      ${ratingHtml(b.rating, mine)}
+      <button class="c-link" data-c>${openC === b.id ? "Fechar" : n ? `${n} ${n === 1 ? "comentário" : "comentários"}` : mine ? "Comentar" : "Comentários"}</button>
+    </div>
+    ${openC === b.id ? cpanelHtml(b, mine) : ""}
+  </div>`;
+}
+
+function cpanelHtml(b, mine) {
+  return `<div class="cpanel">
+    <div class="store">
+      ${safeUrl(b.link) ? `<a href="${safeUrl(b.link)}" target="_blank" rel="noopener">Open Library →</a>` : ""}
+      ${storeLinks(b)}
+    </div>
+    ${mine ? `${user.displayName ? "" : `<input class="c-name" maxlength="40" placeholder="Seu nome" aria-label="Seu nome">`}
+      <textarea class="c-text" maxlength="500" placeholder="O que você achou deste livro?" aria-label="Seu comentário"></textarea>
+      <div class="crow">
+        <button class="btn-mini c-save">Publicar</button>
+        <button class="c-link c-del" hidden>Excluir meu comentário</button>
+        <button class="c-link c-remove">Remover da estante</button>
+        <span class="err c-err" role="alert"></span>
+      </div>` : ""}
+    <div class="c-list"><p class="said small">Carregando comentários…</p></div>
+  </div>`;
+}
+
+function renderShelf() {
+  if ($("estante").hidden) return; // não mexe nos comentários abertos em outra tela
+  const area = $("shelf-area");
   $("go-shelf").hidden = !(user && shelf.length);
-  $("login-hint").hidden = !!user;
-};
+  if (!user) {
+    cUnsub?.(); cUnsub = null;
+    $("shelf-sum").textContent = "";
+    area.innerHTML = `<p class="empty">Entre para montar sua estante e guardar os livros que você já leu.</p>`;
+    return;
+  }
+  const by = (k) => shelf.filter((b) => statusOf(b) === k).length;
+  $("shelf-sum").textContent = shelf.length
+    ? `${by("lido")} ${by("lido") === 1 ? "lido" : "lidos"}, ${by("lendo")} lendo e ${by("quero")} na fila.`
+    : "";
+  if (!shelf.length) {
+    cUnsub?.(); cUnsub = null;
+    area.innerHTML = `<p class="empty">Sua estante está vazia. Peça uma recomendação, ou veja os mais lidos, e use “+ Quero ler”.</p>`;
+    return;
+  }
+  const draft = area.querySelector(".c-text")?.value;
+  const shown = shelf.filter((b) => filter === "todos" || statusOf(b) === filter);
+  area.innerHTML = `
+    <div class="shelf-row mini">${shelf.map((b, i) => spineHtml(b, i, {
+      base: 170, status: statusOf(b), mark: statusOf(b) === "lendo" ? "reading" : "",
+    })).join("")}</div>
+    <div class="tabs">${["todos", "quero", "lendo", "lido"].map((k) =>
+      `<button data-f="${k}" aria-pressed="${filter === k}">${k === "todos" ? "Todos" : STATUS[k]} (${k === "todos" ? shelf.length : by(k)})</button>`).join("")}</div>
+    <div class="rows">${shown.length
+      ? shown.map((b) => rowHtml(b, true)).join("")
+      : `<p class="empty" style="padding:28px 0">Nenhum livro com esse status.</p>`}</div>`;
 
-const cut = (s) => (s.length > 80 ? s.slice(0, 80) + "…" : s);
-const SKELETON = (what) => `<p class="note">Procurando ${esc(what)}. Isso leva até 30 segundos.</p>`
-  + `<article class="rec skel"><div class="cover"></div><div><i></i><i></i><i></i></div></article>`.repeat(3);
+  area.querySelector(".shelf-row").onclick = (e) => {
+    const s = e.target.closest(".spine");
+    if (!s) return;
+    const b = shelf[Number(s.dataset.i)];
+    filter = "todos";
+    openC = openC === b.id ? null : b.id;
+    renderShelf();
+    area.querySelector(`.row[data-id="${CSS.escape(b.id)}"]`)?.scrollIntoView({ block: "center", behavior: "smooth" });
+  };
+  area.querySelectorAll("[data-f]").forEach((t) => (t.onclick = () => { filter = t.dataset.f; renderShelf(); }));
+  wireRows(area, shelf, true);
+  if (draft && area.querySelector(".c-text")) area.querySelector(".c-text").value = draft;
+  shown.slice(0, 20).forEach((b) => countRowComments(b.id));
+}
 
-async function recommend(useShelf) {
-  if (!requireLogin(() => recommend(useShelf))) { $("out").innerHTML = `<p class="note">Entre na sua conta para pedir recomendações.</p>`; return; }
-  const tags = [...document.querySelectorAll("#tags input:checked")].map((i) => i.value);
-  if (!useShelf && !$("text").value.trim() && !tags.length) { $("out").innerHTML = `<p class="note">Escreva o que procura ou escolha uma característica.</p>`; return; }
-  $("go").disabled = $("go-shelf").disabled = true;
-  $("out").innerHTML = SKELETON(useShelf
-    ? "livros parecidos com os da sua estante"
-    : cut([$("text").value.trim(), ...tags].filter(Boolean).join(", ")));
+// Liga os controles das linhas (status, nota, comentários) da minha estante ou da de outro leitor
+function wireRows(area, books, mine) {
+  const find = (el) => books.find((b) => b.id === el.closest(".row").dataset.id);
+  area.querySelectorAll(".row .status-btn").forEach((btn) => {
+    if (!mine) return;
+    btn.onclick = () => {
+      const b = find(btn);
+      updateDoc(doc(db, "users", user.uid, "books", b.id), { status: NEXT[statusOf(b)] });
+    };
+  });
+  area.querySelectorAll(".row [data-r]").forEach((btn) => {
+    if (!mine) return;
+    btn.onclick = () => {
+      const b = find(btn);
+      const n = Number(btn.dataset.r);
+      updateDoc(doc(db, "users", user.uid, "books", b.id), { rating: n === (b.rating || 0) ? 0 : n }); // clicar na mesma nota limpa
+    };
+  });
+  area.querySelectorAll(".row [data-c]").forEach((btn) => (btn.onclick = () => {
+    const b = find(btn);
+    openC = openC === b.id ? null : b.id;
+    mine ? renderShelf() : renderReaders();
+  }));
+  const panel = area.querySelector(".cpanel");
+  if (!panel) { cUnsub?.(); cUnsub = null; return; }
+  const b = books.find((x) => x.id === openC);
+  if (!b) return;
+  if (mine) {
+    panel.querySelector(".c-save").onclick = () => saveComment(panel, b);
+    panel.querySelector(".c-del").onclick = () => deleteDoc(doc(db, "books", b.id, "comments", user.uid));
+    panel.querySelector(".c-remove").onclick = async () => { openC = null; await deleteDoc(doc(db, "users", user.uid, "books", b.id)); };
+  }
+  watchComments(b.id, panel.querySelector(".c-list"), mine, panel);
+}
+
+// ======================= comentários =======================
+let myComment = null;
+
+function commentsHtml(list) {
+  const n = (c) => new Set(c.likes).size;
+  list.sort((a, b) => n(b) - n(a) || (a.createdAt?.seconds ?? 1e12) - (b.createdAt?.seconds ?? 1e12));
+  return list.length ? list.map((c) => {
+    const liked = user ? c.likes.includes(user.uid) : false;
+    return `<div class="c"><b>${esc(c.name)}</b><p>${esc(c.text)}</p>
+      <button class="like" data-uid="${esc(c.uid)}" aria-pressed="${liked}"
+        aria-label="${liked ? "Descurtir" : "Curtir"} comentário de ${esc(c.name)}">♥ ${n(c)}</button></div>`;
+  }).join("") : `<p class="said small">Ninguém comentou este livro ainda.</p>`;
+}
+
+function watchComments(id, box, mine, panel) {
+  if (!box) return;
+  cUnsub?.();
+  cUnsub = onSnapshot(collection(db, "books", id, "comments"), (snap) => {
+    const list = snap.docs.map((d) => d.data());
+    commentCounts[id] = list.length;
+    if (mine && panel) {
+      myComment = list.find((c) => c.uid === user.uid) || null;
+      const t = panel.querySelector(".c-text");
+      if (myComment && !t.value) t.value = myComment.text;
+      panel.querySelector(".c-save").textContent = myComment ? "Atualizar" : "Publicar";
+      panel.querySelector(".c-del").hidden = !myComment;
+    }
+    box.innerHTML = commentsHtml(list);
+    box.onclick = (e) => {
+      const btn = e.target.closest(".like");
+      if (!btn || !user) return;
+      updateDoc(doc(db, "books", id, "comments", btn.dataset.uid),
+        { likes: btn.getAttribute("aria-pressed") === "true" ? arrayRemove(user.uid) : arrayUnion(user.uid) });
+    };
+  }, () => { box.innerHTML = `<p class="said small">Não foi possível carregar os comentários.</p>`; });
+}
+
+async function saveComment(panel, b) {
+  const text = panel.querySelector(".c-text").value.trim();
+  const name = user.displayName || panel.querySelector(".c-name")?.value.trim();
+  const err = panel.querySelector(".c-err");
+  err.textContent = "";
+  if (!text) { err.textContent = "Escreva um comentário antes de publicar."; return; }
+  if (!name) { err.textContent = "Diga seu nome para aparecer nos comentários."; return; }
   try {
-    const body = { text: $("text").value, tags, idToken: await user.getIdToken(), exclude: shelf.map((b) => b.title) };
-    if (useShelf) body.shelf = shelf.slice(-40).map(({ title, author, status, rating }) => ({ title, author, status: status || "lido", rating: rating || 0 }));
-    const r = await fetch("/api/recommend", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
-    const data = await r.json();
-    if (!r.ok) throw new Error(data.error);
-    lastRecs = data;
-    renderRecs();
-  } catch (e) {
-    $("out").innerHTML = `<p class="note">${esc(e.message)}</p>`;
-  } finally {
-    $("go").disabled = $("go-shelf").disabled = false;
+    if (!user.displayName) await updateProfile(user, { displayName: name });
+    const ref = doc(db, "books", b.id, "comments", user.uid);
+    if (myComment) await updateDoc(ref, { text, name });
+    else await setDoc(ref, { uid: user.uid, name, text, likes: [], createdAt: serverTimestamp() });
+  } catch {
+    err.textContent = "Não foi possível publicar. Tente de novo.";
   }
 }
-$("go").onclick = () => recommend(false);
-$("go-shelf").onclick = () => recommend(true);
 
+// Conta os comentários das linhas visíveis, no máximo 20 por abertura da tela
+async function countRowComments(id) {
+  if (commentCounts[id] !== undefined) return;
+  try {
+    commentCounts[id] = (await getCountFromServer(collection(db, "books", id, "comments"))).data().count;
+    if (!commentCounts[id]) return;
+    const row = document.querySelector(`.row[data-id="${CSS.escape(id)}"] [data-c]`);
+    if (row && row.textContent === "Comentar") row.textContent = `${commentCounts[id]} ${commentCounts[id] === 1 ? "comentário" : "comentários"}`;
+  } catch {}
+}
+
+// ======================= Mais lidos =======================
+let topData = null, nytData = null, topLoading = false;
+let src = "nyt";
+const listIdx = { nyt: 0, ol: 0 };
+let updatedNote = "";
+
+async function loadTop() {
+  if (topData || topLoading) return;
+  topLoading = true;
+  $("top-area").innerHTML = `<p class="loading" style="margin-top:0;padding:80px 0">Carregando os rankings…</p>`;
+  try {
+    const d = (await getDoc(doc(db, "public", "bestsellers"))).data();
+    nytData = d?.lists ?? [];
+    topData = d?.genres ?? [];
+    const at = d?.updatedAt?.toDate();
+    const stale = at && Date.now() - at > 3 * 864e5;
+    updatedNote = at ? `${stale ? "Pode estar desatualizado. " : ""}Atualizado em ${at.toLocaleDateString("pt-BR")}` : "";
+  } catch {
+    nytData = [];
+    topData = [];
+  }
+  topLoading = false;
+  renderTop();
+}
+
+function renderTop() {
+  if (!topData) return;
+  const lists = src === "nyt" ? nytData : topData;
+  document.querySelectorAll("#src-seg button").forEach((b) => b.setAttribute("aria-pressed", b.dataset.src === src));
+  if (!lists.length) {
+    $("top-tabs").innerHTML = "";
+    $("top-area").innerHTML = `<p class="empty">Não foi possível carregar os rankings. Recarregue a página.</p>`;
+    $("top-note").textContent = "";
+    return;
+  }
+  const li = Math.min(listIdx[src], lists.length - 1);
+  const have = new Set(shelf.map((b) => b.id));
+  $("top-tabs").innerHTML = lists.map((l, i) =>
+    `<button data-t="${i}" aria-pressed="${i === li}">${esc(l.name)}</button>`).join("");
+  $("top-area").innerHTML = `<ol class="rank-list">${lists[li].books.map((b, i) => {
+    const saved = have.has(bookId(b));
+    return `<li class="rank-item">
+      <span class="rank-n">${i + 1}</span>
+      <div>
+        <h3 class="rank-title">${esc(titleOf(b))}</h3>
+        <p class="rank-meta">${esc(b.author)}${b.weeks > 1 ? ` · ${b.weeks} semanas na lista` : ""}${b.titlePt ? ` · ${esc(b.title)}` : ""}</p>
+      </div>
+      <button class="btn-mini ${saved ? "on" : ""}" data-i="${i}" ${saved ? "disabled" : ""}>${saved ? "✓ Na estante" : "+ Quero ler"}</button>
+      <p class="rank-buy">${storeLinks(b)}</p>
+    </li>`;
+  }).join("")}</ol>`;
+  $("top-note").textContent = src === "nyt"
+    ? `Listas da semana nos EUA, do New York Times${updatedNote ? " · " + updatedNote : ""}`
+    : `Open Library, por quantas pessoas guardaram o livro${updatedNote ? " · " + updatedNote : ""}`;
+  $("top-area").onclick = (e) => {
+    const btn = e.target.closest("[data-i]");
+    if (btn) addBook(lists[li].books[Number(btn.dataset.i)]);
+  };
+  $("top-tabs").onclick = (e) => {
+    const t = e.target.closest("[data-t]");
+    if (t) { listIdx[src] = Number(t.dataset.t); renderTop(); }
+  };
+}
+$("src-seg").onclick = (e) => {
+  const b = e.target.closest("[data-src]");
+  if (b) { src = b.dataset.src; renderTop(); }
+};
+
+// ======================= Leitores =======================
+let myProfile = null;
+let following = new Set();
+let readersCache = null;
+let readersTab = "todos";
+let readerView = null; // leitor aberto
+let readerBooks = [];
+const readerInfo = {}; // uid -> { count, books }
+
+function renderReaders() {
+  if ($("leitores").hidden) return;
+  const area = $("readers-area");
+  if (!user) {
+    area.innerHTML = `<p class="empty">Entre para ver outros leitores e as estantes públicas deles.</p>`;
+    return;
+  }
+  if (readerView) return renderReader(area);
+  area.innerHTML = `
+    ${myProfile?.shelfPublic ? "" : `<p class="said" style="margin-top:20px">Sua estante está privada: você vê os outros, mas ninguém vê a sua. Mude isso em <b>${esc(myProfile?.name || user.displayName || "Minha conta")}</b>, no topo.</p>`}
+    <div class="tabs">${["todos", "seguindo"].map((k) =>
+      `<button data-rt="${k}" aria-pressed="${readersTab === k}">${k === "todos" ? "Todos" : "Seguindo"}</button>`).join("")}</div>
+    <div id="readers-list"><p class="loading" style="margin-top:0;padding:60px 0">Carregando leitores…</p></div>`;
+  area.querySelectorAll("[data-rt]").forEach((t) => (t.onclick = () => { readersTab = t.dataset.rt; renderReaders(); }));
+  loadReadersList();
+}
+
+async function loadReadersList() {
+  const box = $("readers-list");
+  try {
+    readersCache ??= (await getDocs(query(collection(db, "profiles"), where("shelfPublic", "==", true), limit(100))))
+      .docs.map((d) => ({ uid: d.id, ...d.data() })).filter((r) => r.uid !== user.uid);
+  } catch {
+    box.innerHTML = `<p class="empty">Não foi possível carregar os leitores. Recarregue a página.</p>`;
+    return;
+  }
+  const list = readersCache.filter((r) => readersTab === "todos" || following.has(r.uid));
+  if (!list.length) {
+    box.innerHTML = `<p class="empty" style="padding:28px 0">${readersTab === "seguindo"
+      ? "Você ainda não segue ninguém." : "Ainda não há outros leitores com estante pública."}</p>`;
+    $("activity")?.remove();
+    return;
+  }
+  box.innerHTML = `<div class="readers">${list.map((r) => {
+    const info = readerInfo[r.uid];
+    const now = info?.books.find((b) => statusOf(b) === "lendo");
+    return `<div class="reader-card" data-uid="${esc(r.uid)}">
+      <div class="mini-shelf">${(info?.books ?? []).slice(0, 12).map((b) => {
+        const h = hash(bookId(b));
+        return `<i style="width:${7 + (h % 7)}px;height:${44 + (h % 28)}px;background:${colorOf(b)}"></i>`;
+      }).join("")}</div>
+      <button class="reader-name" data-view>${esc(r.name)}</button>
+      <p class="reader-meta">${info ? `${info.count} ${info.count === 1 ? "livro" : "livros"}` : "…"}</p>
+      ${now ? `<p class="reader-now">Lendo agora: ${esc(now.title)}</p>` : ""}
+      <button class="btn-mini ${following.has(r.uid) ? "on" : ""}" data-follow>${following.has(r.uid) ? "Seguindo" : "Seguir"}</button>
+    </div>`;
+  }).join("")}</div>`;
+  box.onclick = (e) => {
+    const card = e.target.closest("[data-uid]");
+    if (!card) return;
+    const r = readersCache.find((x) => x.uid === card.dataset.uid);
+    if (e.target.closest("[data-follow]")) return toggleFollow(r.uid);
+    if (e.target.closest("[data-view]")) return openReader(r);
+  };
+  list.forEach((r) => loadReaderInfo(r.uid));
+  if (readersTab === "seguindo") loadActivity(list); else $("activity")?.remove();
+}
+
+// Capa da estante de cada leitor: contagem, cores das lombadas e o que está lendo agora.
+// Pinta o cartão já desenhado em vez de redesenhar a lista a cada leitor que chega.
+async function loadReaderInfo(uid) {
+  if (readerInfo[uid]) return paintReaderCard(uid);
+  try {
+    const [count, snap] = await Promise.all([
+      getCountFromServer(collection(db, "users", uid, "books")),
+      getDocs(query(collection(db, "users", uid, "books"), orderBy("addedAt", "desc"), limit(12))),
+    ]);
+    readerInfo[uid] = { count: count.data().count, books: snap.docs.map((d) => ({ id: d.id, ...d.data() })) };
+    paintReaderCard(uid);
+  } catch {}
+}
+
+function paintReaderCard(uid) {
+  const card = document.querySelector(`.reader-card[data-uid="${CSS.escape(uid)}"]`);
+  const info = readerInfo[uid];
+  if (!card || !info) return;
+  card.querySelector(".mini-shelf").innerHTML = info.books.slice(0, 12).map((b) => {
+    const h = hash(bookId(b));
+    return `<i style="width:${7 + (h % 7)}px;height:${44 + (h % 28)}px;background:${colorOf(b)}"></i>`;
+  }).join("");
+  card.querySelector(".reader-meta").textContent = `${info.count} ${info.count === 1 ? "livro" : "livros"}`;
+  const now = info.books.find((b) => statusOf(b) === "lendo");
+  const line = card.querySelector(".reader-now");
+  if (now && !line) card.querySelector(".reader-meta").insertAdjacentHTML("afterend", `<p class="reader-now">Lendo agora: ${esc(now.title)}</p>`);
+  else if (now) line.textContent = `Lendo agora: ${now.title}`;
+  else line?.remove();
+}
+
+// Últimos livros adicionados por quem você segue (só estantes públicas respondem)
+async function loadActivity(list) {
+  const rows = (await Promise.all(list.slice(0, 15).map(async (r) => {
+    try {
+      const snap = await getDocs(query(collection(db, "users", r.uid, "books"), orderBy("addedAt", "desc"), limit(3)));
+      return snap.docs.map((d) => ({ name: r.name, ...d.data() }));
+    } catch { return []; }
+  }))).flat().sort((a, b) => (b.addedAt?.seconds ?? 0) - (a.addedAt?.seconds ?? 0)).slice(0, 10);
+  if (readersTab !== "seguindo" || !$("readers-list")) return;
+  $("activity")?.remove();
+  $("readers-list").insertAdjacentHTML("afterend", `<div class="activity" id="activity">
+    <h2>Atividade recente</h2>
+    ${rows.length ? `<ul>${rows.map((a) => `<li><b>${esc(a.name)}</b> guardou <em>${esc(a.title)}</em> — ${STATUS[a.status || "lido"]}</li>`).join("")}</ul>`
+      : `<p class="empty">Ninguém que você segue guardou livros ainda.</p>`}</div>`);
+}
+
+const toggleFollow = (uid) => following.has(uid)
+  ? deleteDoc(doc(db, "users", user.uid, "following", uid))
+  : setDoc(doc(db, "users", user.uid, "following", uid), { at: serverTimestamp() });
+
+function openReader(r) {
+  rUnsub?.();
+  readerView = r;
+  readerBooks = [];
+  openC = null;
+  rUnsub = onSnapshot(collection(db, "users", r.uid, "books"), (snap) => {
+    readerBooks = snap.docs.map((d) => ({ id: d.id, ...d.data() })).sort((a, b) => (a.addedAt?.seconds ?? 1e12) - (b.addedAt?.seconds ?? 1e12));
+    renderReaders();
+  }, () => { readerBooks = null; renderReaders(); }); // sem permissão: a pessoa fechou a estante
+  renderReaders();
+}
+
+function renderReader(area) {
+  const r = readerView;
+  area.innerHTML = `
+    <button class="back" id="r-back">← Todos os leitores</button>
+    <div class="page-head" style="margin-top:20px">
+      <div><h1 style="font-size:clamp(36px,5vw,56px)">${esc(r.name)}</h1></div>
+      <button class="btn-mini ${following.has(r.uid) ? "on" : ""}" id="r-follow">${following.has(r.uid) ? "Seguindo" : "Seguir"}</button>
+    </div>
+    <div id="reader-shelf"></div>`;
+  $("r-back").onclick = () => { rUnsub?.(); rUnsub = null; cUnsub?.(); cUnsub = null; readerView = null; openC = null; renderReaders(); };
+  $("r-follow").onclick = () => toggleFollow(r.uid);
+  const box = $("reader-shelf");
+  if (readerBooks === null) { box.innerHTML = `<p class="empty">Esta estante não está mais pública.</p>`; return; }
+  if (!readerBooks.length) { box.innerHTML = `<p class="empty">Esta estante ainda está vazia.</p>`; return; }
+  box.innerHTML = `
+    <div class="shelf-row mini">${readerBooks.map((b, i) => spineHtml(b, i, {
+      base: 170, status: statusOf(b), mark: statusOf(b) === "lendo" ? "reading" : "",
+    })).join("")}</div>
+    <div class="rows">${readerBooks.map((b) => rowHtml(b, false)).join("")}</div>`;
+  box.querySelector(".shelf-row").onclick = (e) => {
+    const s = e.target.closest(".spine");
+    if (!s) return;
+    const b = readerBooks[Number(s.dataset.i)];
+    openC = openC === b.id ? null : b.id;
+    renderReaders();
+  };
+  wireRows(box, readerBooks, false);
+}
+
+// ======================= privacidade e exclusão de conta =======================
+$("privacy-btn").onclick = () => {
+  $("delete-box").hidden = !user;
+  $("delete-confirm-box").hidden = true;
+  $("delete-confirm").value = "";
+  $("delete-btn").disabled = true;
+  $("delete-err").textContent = "";
+  $("privacy-dlg").showModal();
+};
+$("privacy-close").onclick = () => $("privacy-dlg").close();
+$("delete-start").onclick = () => { $("delete-confirm-box").hidden = false; $("delete-confirm").focus(); };
+$("delete-confirm").oninput = () => { $("delete-btn").disabled = $("delete-confirm").value.trim() !== "EXCLUIR"; };
+$("delete-btn").onclick = async () => {
+  $("delete-btn").disabled = true;
+  try {
+    const r = await fetch("/api/delete-account", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ idToken: await user.getIdToken() }) });
+    if (!r.ok) throw new Error((await r.json()).error);
+    $("privacy-dlg").close();
+    await signOut(auth);
+    phase = "fail";
+    failMsg = "Sua conta e seus dados foram excluídos.";
+    renderRec();
+    showTab("recomendar");
+  } catch (e) {
+    $("delete-err").textContent = e.message || "Não foi possível excluir agora. Tente de novo.";
+    $("delete-btn").disabled = false;
+  }
+};
+
+syncClear();
+charsFoot();
 showTab(tabFromHash(), true);
